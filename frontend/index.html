@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Consultor de RUT - BL Capital</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js";
+    import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAUtJoJRUGDwpGhLXr-0WhGvtKlr0YwNWY",
+      authDomain: "plazos-bl.firebaseapp.com",
+      projectId: "plazos-bl",
+      storageBucket: "plazos-bl.firebasestorage.app",
+      messagingSenderId: "39828725985",
+      appId: "1:39828725985:web:f414fa57db531758d397a0"
+    };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+
+    const loginBtn = document.getElementById("loginBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const authSection = document.getElementById("authSection");
+    const appContent = document.getElementById("appContent");
+
+    loginBtn.addEventListener("click", () => {
+      signInWithPopup(auth, provider).catch((error) => {
+        alert("Error al iniciar sesión: " + error.message);
+      });
+    });
+
+    logoutBtn.addEventListener("click", () => {
+      signOut(auth);
+    });
+
+    onAuthStateChanged(auth, (user) => {
+      if (user && user.email.endsWith("@blcapital.cl")) {
+        authSection.classList.add("hidden");
+        appContent.classList.remove("hidden");
+      } else {
+        authSection.classList.remove("hidden");
+        appContent.classList.add("hidden");
+      }
+    });
+  </script>
+</head>
+<body class="bg-white text-gray-800 font-sans">
+  <header class="bg-blue-900 text-white shadow">
+    <div class="max-w-6xl mx-auto flex justify-between items-center p-4">
+      <img src="assets/logo.png" alt="BL Capital" class="h-10">
+      <h1 class="text-xl font-semibold">Consultor de Plazos de Pago</h1>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto mt-10 p-4">
+    <div id="authSection" class="text-center">
+      <p class="text-lg mb-4">Accede con tu cuenta corporativa @blcapital.cl</p>
+      <button id="loginBtn" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">Iniciar sesión con Google</button>
+    </div>
+
+    <div id="appContent" class="hidden">
+      <div class="flex justify-end mb-4">
+        <button id="logoutBtn" class="bg-gray-300 px-3 py-1 text-sm rounded hover:bg-gray-400">Cerrar sesión</button>
+      </div>
+
+      <form id="consultaForm" class="flex gap-4 mb-6">
+        <input type="text" id="rut" placeholder="Ingrese RUT del deudor" required class="border rounded px-4 py-2 flex-1">
+        <button type="submit" class="bg-blue-700 text-white px-6 py-2 rounded hover:bg-blue-800">Consultar</button>
+      </form>
+
+      <div id="resultados" class="space-y-6"></div>
+    </div>
+  </main>
+
+  <footer class="bg-gray-100 text-center text-sm py-4 text-gray-600">
+    &copy; 2025 BL Capital. Todos los derechos reservados.
+  </footer>
+
+  <script>
+    let simulacionAprobada = false;
+
+    document.getElementById('consultaForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const rut = document.getElementById('rut').value.trim();
+      const res = await fetch(`https://https://plazos-bl.web.app//consultar-rut?rut=${rut}`);
+      const data = await res.json();
+      mostrarResultados(data);
+    });
+
+    function mostrarResultados(data) {
+      const div = document.getElementById('resultados');
+      div.innerHTML = '';
+
+      if (data.error) {
+        div.innerHTML = `<p class="text-red-600 font-semibold">${data.error}</p>`;
+        return;
+      }
+
+      const f = formatFecha;
+      const nombre = data.nombre_deudor || "Sin nombre";
+      const claseRecomendacion = data.recomendacion.includes("riesgo") ? "text-red-600" : "text-green-700";
+
+      let html = `
+        <h2 class="text-xl font-bold text-blue-800 mb-4">Deudor: ${nombre}</h2>
+        <section>
+          <h2 class="text-lg font-semibold text-blue-800 mt-4 mb-2">Recomendación Final</h2>
+          <p class="font-semibold ${claseRecomendacion}">${data.recomendacion}</p>
+        </section>
+      `;
+
+      if (!data.recomendacion.toLowerCase().includes("riesgo")) {
+        html += `
+          <section class="mt-6">
+            <h2 class="text-lg font-semibold text-blue-800 mb-2">¿Desea revisar plazo y anticipo?</h2>
+            <div class="flex items-end gap-4 mb-4">
+              <div>
+                <label for="plazo" class="block text-sm font-medium">Plazo (días):</label>
+                <input type="number" id="plazo" class="border px-2 py-1 w-24" min="1">
+              </div>
+              <div>
+                <label for="anticipo" class="block text-sm font-medium">% Anticipo:</label>
+                <input type="number" id="anticipo" class="border px-2 py-1 w-24" min="0" max="100">
+              </div>
+              <button onclick="simular(${data.plazo_recomendado})" class="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600">Simular</button>
+              <button id="confirmarBtn" onclick="confirmarSimulacion()" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700" disabled>Confirmar</button>
+            </div>
+            <div id="evaluacionResultado" class="mt-4 text-sm font-semibold"></div>
+          </section>
+        `;
+      }
+
+      // Mostrar datos de empresas similares si existen
+      if (
+        'promedio_empresas_similares' in data &&
+        'desviacion_empresas_similares' in data &&
+        'rubro' in data &&
+        'tramo' in data
+      ) {
+        html += `
+          <section class="mt-8">
+            <h2 class="text-lg font-semibold text-blue-800 mb-2">Datos de Empresas Similares</h2>
+            <p class="text-sm italic text-gray-600 mb-2">(*) Se consideran empresas similares las empresas del mismo rubro que tengan el tramo según ventas.</p>
+            <p><strong>Rubro:</strong> ${data.rubro}</p>
+            <p><strong>Tramo según ventas:</strong> ${data.tramo}</p>
+            <p><strong>Promedio de pago empresas similares:</strong> ${data.promedio_empresas_similares.toFixed(2)} días</p>
+            <p><strong>Desviación estándar:</strong> ${data.desviacion_empresas_similares.toFixed(2)} días</p>
+            <p><strong>Cantidad de empresas similares consideradas:</strong> ${data.cantidad_empresas_similares}</p>
+          </section>
+        `;
+      }
+
+      if (data.ultimos_pagos && data.ultimos_pagos.length > 0) {
+        const ultimosPagos = data.ultimos_pagos.map(p => `
+          <tr class="border-t">
+            <td class="px-3 py-2 text-center">${p.monto.toLocaleString()}</td>
+            <td class="px-3 py-2 text-center">${f(p.fecha_ces)}</td>
+            <td class="px-3 py-2 text-center">${f(p.fecha_emision)}</td>
+            <td class="px-3 py-2 text-center">${f(p.fecha_pago)}</td>
+            <td class="px-3 py-2 text-center">${p.plazo}</td>
+          </tr>`).join('');
+
+        html += `
+          <section>
+            <h2 class="text-lg font-semibold text-blue-800 mt-8 mb-2">Últimos Pagos</h2>
+            <table class="w-full border">
+              <thead class="bg-gray-100">
+                <tr><th>Monto Factura</th><th>Fecha de Compra</th><th>Fecha de Emisión</th><th>Fecha de Pago</th><th>Plazo de Pago (Días)</th></tr>
+              </thead>
+              <tbody>${ultimosPagos}</tbody>
+            </table>
+            <p class="mt-2">Promedio últimos 5 pagos: <strong>${data.promedio_ultimos.toFixed(2)} días</strong></p>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-semibold text-blue-800 mt-8 mb-2">Promedio Histórico</h2>
+            <p>Pagos considerados: <strong>${data.cantidad_historico}</strong></p>
+            <p>Promedio: <strong>${data.promedio_historico.toFixed(2)} días</strong></p>
+            <p>Desviación estándar: <strong>${data.desviacion_estandar.toFixed(2)}</strong></p>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-semibold text-blue-800 mt-8 mb-2">Factura de mayor plazo de pago</h2>
+            <p>Monto: ${data.factura_mas_lenta.monto.toLocaleString()}</p>
+            <p>Fecha de Compra: ${f(data.factura_mas_lenta.fecha_ces)}</p>
+            <p>Fecha de Emisión: ${f(data.factura_mas_lenta.fecha_emision)}</p>
+            <p>Fecha de Pago: ${f(data.factura_mas_lenta.fecha_pago)}</p>
+            <p>Plazo de Pago: <strong>${data.factura_mas_lenta.plazo} días</strong></p>
+          </section>
+        `;
+
+        const morosos = data.morosos.map(m => `
+          <tr class="border-t">
+            <td class="px-3 py-2 text-center">${m.monto.toLocaleString()}</td>
+            <td class="px-3 py-2 text-center">${m.saldo.toLocaleString()}</td>
+            <td class="px-3 py-2 text-center">${formatFecha(m.fecha_ces)}</td>
+            <td class="px-3 py-2 text-center">${formatFecha(m.fecha_emision)}</td>
+            <td class="px-3 py-2 text-center">${m.dias_vencido}</td>
+            <td class="px-3 py-2 text-center">${m.dias_mora ?? 'N/A'}</td>
+          </tr>`).join('');
+
+        html += `
+          <section>
+            <h2 class="text-lg font-semibold text-blue-800 mt-8 mb-2">Facturas Morosas</h2>
+            <table class="w-full border border-gray-300 text-sm text-right font-mono">
+              <thead class="bg-gray-100 text-blue-900 font-semibold text-sm text-center">
+                <tr><th>Monto</th><th>Saldo</th><th>Compra</th><th>Emisión</th><th>Días desde la emisión</th><th>Días de Mora</th></tr>
+              </thead>
+              <tbody>${morosos || '<tr><td colspan="6">Sin facturas morosas</td></tr>'}</tbody>
+            </table>
+          </section>
+        `;
+      }
+
+      div.innerHTML = html;
+    }
+
+    function simular(plazoRecomendado) {
+      const plazo = parseInt(document.getElementById('plazo').value);
+      const anticipo = parseFloat(document.getElementById('anticipo').value);
+      const resultado = document.getElementById('evaluacionResultado');
+      const confirmarBtn = document.getElementById('confirmarBtn');
+
+      if (isNaN(plazo) || isNaN(anticipo)) {
+        alert("Por favor ingrese valores válidos para plazo y anticipo.");
+        return;
+      }
+
+      const dias_extra = Math.ceil((100 - anticipo) * 7.5);
+      const total = plazo + dias_extra;
+
+      if (total >= plazoRecomendado) {
+        simulacionAprobada = true;
+        confirmarBtn.disabled = false;
+        resultado.innerHTML = `<p class="text-green-700">✅ Plazo y anticipo aprobados (total: ${total} días vs recomendado: ${plazoRecomendado}).</p>`;
+      } else {
+        simulacionAprobada = false;
+        confirmarBtn.disabled = true;
+        resultado.innerHTML = `<p class="text-red-600">⚠️ El plazo y anticipo sugeridos no alcanzan lo recomendado (${total} vs ${plazoRecomendado}). Revise con riesgo.</p>`;
+      }
+    }
+
+    function confirmarSimulacion() {
+      if (!simulacionAprobada) return;
+      document.getElementById('plazo').disabled = true;
+      document.getElementById('anticipo').disabled = true;
+      document.getElementById('confirmarBtn').disabled = true;
+
+      const resultado = document.getElementById('evaluacionResultado');
+      resultado.innerHTML += `<button onclick="window.print()" class="mt-2 bg-green-600 text-white px-4 py-1 rounded hover:bg-green-700">Guardar como PDF</button>`;
+    }
+
+    function formatFecha(fechaStr) {
+      if (!fechaStr) return 'N/A';
+      const fecha = new Date(fechaStr);
+      const d = String(fecha.getDate()).padStart(2, '0');
+      const m = String(fecha.getMonth() + 1).padStart(2, '0');
+      const y = fecha.getFullYear();
+      return `${d}-${m}-${y}`;
+    }
+  </script>
+</body>
+</html>
