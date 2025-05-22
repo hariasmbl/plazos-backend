@@ -9,7 +9,13 @@ import os
 # Configuración inicial
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
-client = MongoClient(MONGO_URI)
+try:
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    client.server_info()  # Fuerza conexión para detectar error de inmediato
+    print("✅ Conexión con MongoDB Atlas OK")
+except Exception as e:
+    print("❌ Error al conectar con MongoDB:", e)
+    raise e
 db = client["mi_base_datos"]
 docs = db["docs"]
 pagos = db["pagos"]
@@ -24,8 +30,7 @@ def read_root():
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        #"https://plazos-bl.web.app"  # frontend en producción
-        "*"
+        "https://plazos-bl.web.app"  # frontend en producción
     ],
     allow_credentials=True,
     allow_methods=["*"],

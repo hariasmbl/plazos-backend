@@ -84,7 +84,11 @@
     document.getElementById('consultaForm').addEventListener('submit', async function (e) {
       e.preventDefault();
       const rut = document.getElementById('rut').value.trim();
-      const res = await fetch(`https://plazos-backend.onrender.com/consultar-rut?rut=${rut}`);
+      const res = await fetch(`https://plazos-backend.onrender.com/consultar-rut?rut=${rut}`, {
+        method: "GET",
+        mode: "cors"
+      });
+
 
       const data = await res.json();
       mostrarResultados(data);
