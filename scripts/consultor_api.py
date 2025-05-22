@@ -24,7 +24,8 @@ def read_root():
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://plazos-bl.web.app"  # frontend en producción
+        #"https://plazos-bl.web.app"  # frontend en producción
+        "*"
     ],
     allow_credentials=True,
     allow_methods=["*"],
