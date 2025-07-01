@@ -246,20 +246,32 @@ async def guardar_archivo(file: UploadFile, tipo: str):
             from scripts.cargar_datos import cargar_excel, insertar_documentos
             df = cargar_excel(ruta)
             if not df.empty:
-                insertar_documentos(df, filename)
+                resumen = insertar_documentos(df, filename)
+                return {
+                    "mensaje": f"✅ Archivo {filename} subido y procesado.",
+                    "resumen": resumen
+                }
 
         elif tipo == "cartola":
             from scripts.cargar_pagos import cargar_y_limpiar_excel, insertar_documentos
             df = cargar_y_limpiar_excel(ruta)
             if not df.empty:
-                insertar_documentos(df, filename)
+                resumen = insertar_documentos(df, filename)
+                return {
+                    "mensaje": f"✅ Archivo {filename} subido y procesado.",
+                    "resumen": resumen
+                }
 
         elif tipo == "empresas":
             from scripts.cargar_empresas import procesar_txt
-            procesar_txt(ruta)  # Debes crear esta función en cargar_empresas.py
+            procesar_txt(ruta)
+            return {
+                "mensaje": f"✅ Archivo {filename} subido y empresas actualizadas."
+            }
 
-        return {"mensaje": f"✅ Archivo {filename} subido y procesado."}
+        return {"mensaje": f"⚠️ El archivo {filename} no contenía datos válidos."}
 
     except Exception as e:
         return {"mensaje": f"❌ Error al subir archivo: {str(e)}"}
+
 

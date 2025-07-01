@@ -67,6 +67,13 @@ def insertar_documentos(df, nombre_archivo):
 
     print(f"✅ Insertados: {nuevos} | 🔁 Duplicados: {duplicados}")
 
+    return {
+        "nuevos": nuevos,
+        "duplicados": duplicados,
+        "actualizados": 0  # Pagos no se actualizan
+    }
+
+
 # Mover archivo procesado
 def mover_a_procesados(path):
     destino = os.path.join("data", "procesados")

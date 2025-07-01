@@ -62,3 +62,39 @@ def procesar_txt(ruta):
     empresas.insert_many(registros)
     print(f"{len(registros)} empresas insertadas.")
 
+def procesar_txt(ruta):
+    from pymongo import MongoClient
+    import os
+    from dotenv import load_dotenv
+    import pandas as pd
+
+    load_dotenv()
+    MONGO_URI = os.getenv("MONGO_URI")
+    client = MongoClient(MONGO_URI)
+    db = client["mi_base_datos"]
+    empresas = db["empresas"]
+
+    columnas = [
+        "Año comercial", "RUT", "DV", "Razón social",
+        "Tramo según ventas", "Rubro económico"
+    ]
+
+    df = pd.read_csv(ruta, sep="\t", encoding="utf-8", usecols=columnas, low_memory=False)
+    df = df[df["Año comercial"] == 2023]
+    df["rut"] = df["RUT"].astype(str) + "-" + df["DV"].astype(str)
+    df = df.drop_duplicates(subset="rut")
+
+    registros = []
+    for _, row in df.iterrows():
+        registros.append({
+            "rut": row["rut"],
+            "nombre": str(row["Razón social"]).strip(),
+            "tramo_ventas": str(row["Tramo según ventas"]).strip(),
+            "rubro": str(row["Rubro económico"]).strip()
+        })
+
+    empresas.drop()
+    empresas.insert_many(registros)
+    print(f"{len(registros)} empresas insertadas desde archivo: {ruta}")
+
+

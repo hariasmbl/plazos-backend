@@ -67,6 +67,13 @@ def insertar_documentos(df, nombre_archivo):
 
     print(f"✅ Insertados: {nuevos} | 🔁 Duplicados: {duplicados} | 🔄 Actualizados: {actualizados}")
 
+    return {
+        "nuevos": nuevos,
+        "duplicados": duplicados,
+        "actualizados": actualizados
+    }
+
+
 # --------------------------
 # Procesar archivos tipo "list docs"
 # --------------------------
