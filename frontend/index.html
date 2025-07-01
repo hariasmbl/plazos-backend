@@ -101,8 +101,8 @@
               <button type="submit" class="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-800">Subir Empresas</button>
             </form>
             <div id="uploadStatus" class="text-sm mt-2 text-green-700 font-semibold"></div>
-            <div id="uploadProgress" class="w-full bg-gray-200 h-2 rounded hidden">
-              <div id="uploadBar" class="h-2 bg-blue-600 rounded transition-all duration-300 ease-in-out" style="width: 0%"></div>
+            <div id="uploadProgress" class="w-full bg-gray-200 rounded h-2 mt-2 hidden">
+              <div id="uploadBar" class="bg-blue-600 h-2 rounded" style="width: 0%; transition: width 0.3s;"></div>
             </div>
 
           </div>
@@ -122,93 +122,85 @@
   </footer>
 
   <script>
+  async function manejarCarga(formId, endpoint) {
+    const form = document.getElementById(formId);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fileInput = form.querySelector("input[type='file']");
+      const file = fileInput.files[0];
+      if (!file) return alert("Selecciona un archivo");
 
-    async function manejarCarga(formId, endpoint) {
-      const form = document.getElementById(formId);
-      form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const fileInput = form.querySelector("input[type='file']");
-        const file = fileInput.files[0];
-        if (!file) return alert("Selecciona un archivo");
+      // Forzar apertura del details contenedor
+      form.closest("details").open = true;
 
-        const formData = new FormData();
-        formData.append("file", file);
+      const formData = new FormData();
+      formData.append("file", file);
 
-        const status = document.getElementById("uploadStatus");
-        const progress = document.getElementById("uploadProgress");
-        const bar = document.getElementById("uploadBar");
+      const status = document.getElementById("uploadStatus");
+      const progress = document.getElementById("uploadProgress");
+      const bar = document.getElementById("uploadBar");
 
-        // Reset UI
-        status.innerText = "⏳ Cargando archivo...";
-        status.className = "text-blue-700 font-semibold mt-2";
-        progress.classList.remove("hidden");
-        bar.style.width = "0%";
+      // Reset UI
+      status.innerText = `⏳ Subiendo archivo: ${file.name}`;
+      status.className = "text-blue-700 font-semibold mt-2 animate-pulse";
+      progress.classList.remove("hidden");
+      bar.style.width = "0%";
 
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", `https://plazos-backend.onrender.com${endpoint}`, true);
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `https://plazos-backend.onrender.com${endpoint}`, true);
 
-        // Avance visual de carga
-        xhr.upload.addEventListener("progress", (e) => {
-          if (e.lengthComputable) {
-            const porcentaje = Math.round((e.loaded / e.total) * 100);
-            bar.style.width = `${porcentaje}%`;
-          }
-        });
-
-        // Cuando se complete
-        xhr.onload = () => {
-          progress.classList.add("hidden");
-
-          let data;
-          try {
-            data = JSON.parse(xhr.responseText);
-          } catch (err) {
-            status.innerText = "❌ Error al interpretar respuesta del servidor.";
-            status.classList.add("text-red-600");
-            return;
-          }
-
-          let mensajeFinal = data.mensaje || "Proceso completado.";
-          if (data.resumen) {
-            const r = data.resumen;
-            mensajeFinal += `\n🆕 Nuevos: ${r.nuevos}, 🔁 Duplicados: ${r.duplicados}, 🔄 Actualizados: ${r.actualizados ?? 0}`;
-          }
-
-          status.innerText = mensajeFinal;
-          status.classList.add("animate-pulse");
-
-          if (data.mensaje?.startsWith("✅")) {
-            status.classList.remove("text-red-600");
-            status.classList.add("text-green-700");
-          } else {
-            status.classList.remove("text-green-700");
-            status.classList.add("text-red-600");
-          }
-
-          setTimeout(() => status.classList.remove("animate-pulse"), 1000);
-          fileInput.value = "";
-        };
-
-        xhr.onerror = () => {
-          progress.classList.add("hidden");
-          status.innerText = "❌ Error de red o conexión fallida.";
-          status.classList.remove("text-blue-700");
-          status.classList.add("text-red-600");
-        };
-
-        xhr.send(formData);
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          const porcentaje = Math.round((e.loaded / e.total) * 100);
+          bar.style.width = `${porcentaje}%`;
+        }
       });
-    }
 
-    manejarCarga("formDocs", "/subir-docs");
-    manejarCarga("formPagos", "/subir-pagos");
-    manejarCarga("formEmpresas", "/subir-empresas");
+      xhr.onload = () => {
+        progress.classList.add("hidden");
+        bar.style.width = "0%";
+        status.classList.remove("animate-pulse");
 
-    function limpiarResultados() {
-      document.getElementById("resultados").innerHTML = "";
-    }
+        let data;
+        try {
+          data = JSON.parse(xhr.responseText);
+        } catch (err) {
+          status.innerText = "❌ Error al interpretar respuesta del servidor.";
+          status.className = "text-red-600 font-semibold mt-2";
+          return;
+        }
 
-  </script>
+        let mensajeFinal = data.mensaje || "✅ Proceso completado.";
+        if (data.resumen) {
+          const r = data.resumen;
+          mensajeFinal += `\n🆕 Nuevos: ${r.nuevos}, 🔁 Duplicados: ${r.duplicados}, 🔄 Actualizados: ${r.actualizados ?? 0}`;
+        }
+
+        status.innerText = mensajeFinal;
+        if (data.mensaje?.startsWith("✅")) {
+          status.className = "text-green-700 font-semibold mt-2";
+        } else {
+          status.className = "text-red-600 font-semibold mt-2";
+        }
+
+        fileInput.value = "";
+      };
+
+      xhr.onerror = () => {
+        progress.classList.add("hidden");
+        status.innerText = "❌ Error de red o conexión fallida.";
+        status.className = "text-red-600 font-semibold mt-2";
+      };
+
+      xhr.send(formData);
+    });
+  }
+
+  manejarCarga("formDocs", "/subir-docs");
+  manejarCarga("formPagos", "/subir-pagos");
+  manejarCarga("formEmpresas", "/subir-empresas");
+</script>
+
 
   <script>
     let simulacionAprobada = false;
