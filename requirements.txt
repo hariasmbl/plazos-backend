@@ -6,3 +6,4 @@ python-dotenv
 fastapi
 uvicorn
 numpy
+python-multipart
