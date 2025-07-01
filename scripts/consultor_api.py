@@ -243,19 +243,19 @@ async def guardar_archivo(file: UploadFile, tipo: str):
 
         # Procesar archivo inmediatamente después de guardar
         if tipo == "list docs":
-            from cargar_datos import cargar_excel, insertar_documentos
+            from scripts.cargar_datos import cargar_excel, insertar_documentos
             df = cargar_excel(ruta)
             if not df.empty:
                 insertar_documentos(df, filename)
 
         elif tipo == "cartola":
-            from cargar_pagos import cargar_y_limpiar_excel, insertar_documentos
+            from scripts.cargar_pagos import cargar_y_limpiar_excel, insertar_documentos
             df = cargar_y_limpiar_excel(ruta)
             if not df.empty:
                 insertar_documentos(df, filename)
 
         elif tipo == "empresas":
-            from cargar_empresas import procesar_txt
+            from scripts.cargar_empresas import procesar_txt
             procesar_txt(ruta)  # Debes crear esta función en cargar_empresas.py
 
         return {"mensaje": f"✅ Archivo {filename} subido y procesado."}
