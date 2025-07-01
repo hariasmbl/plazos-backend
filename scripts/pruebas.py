@@ -11,7 +11,7 @@ docs = db["docs"]
 pagos = db["pagos"]
 
 # Buscar la empresa
-rut_consultado = "76107905-0"
+rut_consultado = "79678590-K"
 empresa = empresas.find_one({"rut": rut_consultado})
 if not empresa:
     print("Empresa no encontrada.")

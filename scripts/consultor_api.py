@@ -1,10 +1,13 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query,UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from datetime import datetime
 import numpy as np
 import os
+import shutil
+
+UPLOAD_FOLDER = "data"
 
 # Configuración inicial
 load_dotenv()
@@ -218,3 +221,26 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         "morosos": [],
         "empresas_similares": True  # ← Esta línea activa la sección en el frontend
     }
+@app.post("/subir-docs")
+async def subir_docs(file: UploadFile = File(...)):
+    return await guardar_archivo(file, "list docs")
+
+@app.post("/subir-pagos")
+async def subir_pagos(file: UploadFile = File(...)):
+    return await guardar_archivo(file, "cartola")
+
+@app.post("/subir-empresas")
+async def subir_empresas(file: UploadFile = File(...)):
+    return await guardar_archivo(file, "empresas")
+
+async def guardar_archivo(file: UploadFile, tipo: str):
+    try:
+        filename = file.filename
+        ruta = os.path.join(UPLOAD_FOLDER, filename)
+
+        with open(ruta, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        return {"mensaje": f"✅ Archivo {filename} subido para {tipo}."}
+    except Exception as e:
+        return {"mensaje": f"❌ Error al subir archivo: {str(e)}"}

@@ -24,6 +24,9 @@
     const logoutBtn = document.getElementById("logoutBtn");
     const authSection = document.getElementById("authSection");
     const appContent = document.getElementById("appContent");
+    const adminPanel = document.getElementById("adminPanel");
+
+    const adminEmails = ["harias@blcapital.cl", "fparra@blcapital.cl"];
 
     loginBtn.addEventListener("click", () => {
       signInWithPopup(auth, provider).catch((error) => {
@@ -39,11 +42,19 @@
       if (user && user.email.endsWith("@blcapital.cl")) {
         authSection.classList.add("hidden");
         appContent.classList.remove("hidden");
+        if (adminEmails.includes(user.email)) {
+          adminPanel.classList.remove("hidden");
+        }
       } else {
         authSection.classList.remove("hidden");
         appContent.classList.add("hidden");
       }
     });
+  </script>
+  <script>
+    function normalizarRut(rut) {
+      return rut.replace(/\./g, "").replace(/\s+/g, "").replace(/-k$/i, "-K").toUpperCase();
+    }
   </script>
 </head>
 <body class="bg-white text-gray-800 font-sans">
@@ -66,11 +77,39 @@
       </div>
 
       <form id="consultaForm" class="flex gap-4 mb-6">
-        <input type="text" id="rut" placeholder="Ingrese RUT del deudor" required class="border rounded px-4 py-2 flex-1">
+        <input type="text" id="rut" placeholder="Ingrese RUT del deudor (Ejemplo: 12345678-9)" required class="border rounded px-4 py-2 flex-1">
         <button type="submit" class="bg-blue-700 text-white px-6 py-2 rounded hover:bg-blue-800">Consultar</button>
       </form>
 
+      <div id="adminPanel" class="hidden border-t border-gray-300 pt-6 mt-6">
+        <details class="bg-gray-100 p-4 rounded">
+          <summary class="cursor-pointer font-semibold text-blue-900">📁 Cargar archivos (Solo autorizados)</summary>
+          <div class="mt-4 space-y-4">
+            <form id="formDocs">
+              <label class="block font-medium mb-1">Cargar documentos (.xlsx)</label>
+              <input type="file" name="file" accept=".xlsx,.xls" class="mb-2">
+              <button type="submit" class="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-800">Subir Documentos</button>
+            </form>
+            <form id="formPagos">
+              <label class="block font-medium mb-1">Cargar pagos (.xlsx)</label>
+              <input type="file" name="file" accept=".xlsx,.xls" class="mb-2">
+              <button type="submit" class="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-800">Subir Pagos</button>
+            </form>
+            <form id="formEmpresas">
+              <label class="block font-medium mb-1">Cargar empresas (.txt)</label>
+              <input type="file" name="file" accept=".txt" class="mb-2">
+              <button type="submit" class="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-800">Subir Empresas</button>
+            </form>
+            <div id="uploadStatus" class="text-sm mt-2 text-green-700 font-semibold"></div>
+          </div>
+        </details>
+      </div>
+
       <div id="resultados" class="space-y-6"></div>
+      <div class="mt-4">
+        <button onclick="limpiarResultados()" class="text-sm text-gray-600 underline hover:text-gray-800">Limpiar resultados</button>
+      </div>
+
     </div>
   </main>
 
@@ -79,11 +118,55 @@
   </footer>
 
   <script>
+    async function manejarCarga(formId, endpoint) {
+      const form = document.getElementById(formId);
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fileInput = form.querySelector("input[type='file']");
+        const file = fileInput.files[0];
+        if (!file) return alert("Selecciona un archivo");
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await fetch(`https://plazos-backend.onrender.com${endpoint}`, {
+          method: "POST",
+          body: formData,
+        });
+        const data = await res.json();
+        const status = document.getElementById("uploadStatus");
+        status.innerText = data.mensaje;
+        status.classList.add("animate-pulse");
+        if (data.mensaje.startsWith("✅")) {
+          status.classList.remove("text-red-600");
+          status.classList.add("text-green-700");
+        } else {
+          status.classList.remove("text-green-700");
+          status.classList.add("text-red-600");
+        }
+        setTimeout(() => status.classList.remove("animate-pulse"), 1000);
+
+        fileInput.value = "";
+      });
+    }
+
+    manejarCarga("formDocs", "/subir-docs");
+    manejarCarga("formPagos", "/subir-pagos");
+    manejarCarga("formEmpresas", "/subir-empresas");
+
+    function limpiarResultados() {
+      document.getElementById("resultados").innerHTML = "";
+    }
+
+  </script>
+
+  <script>
     let simulacionAprobada = false;
 
     document.getElementById('consultaForm').addEventListener('submit', async function (e) {
       e.preventDefault();
-      const rut = document.getElementById('rut').value.trim();
+      const rawRut = document.getElementById('rut').value.trim();
+      const rut = normalizarRut(rawRut);
       const res = await fetch(`https://plazos-backend.onrender.com/consultar-rut?rut=${rut}`, {
         method: "GET",
         mode: "cors"
@@ -109,11 +192,18 @@
 
       let html = `
         <h2 class="text-xl font-bold text-blue-800 mb-4">Deudor: ${nombre}</h2>
-        <section>
-          <h2 class="text-lg font-semibold text-blue-800 mt-4 mb-2">Recomendación Final</h2>
-          <p class="font-semibold ${claseRecomendacion}">${data.recomendacion}</p>
-        </section>
       `;
+
+      if (data.riesgo_detectado) {
+        html += `
+          <section class="bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 rounded mb-4">
+            <p>Revisar el plazo y anticipo con RIESGO. Hay documentos morosos cuyo plazo desde la emisión supera lo recomendado (${data.plazo_recomendado} días).</p>
+            <button onclick="window.print()" class="mt-2 bg-green-600 text-white px-4 py-1 rounded hover:bg-green-700">
+              Guardar como PDF
+            </button>          
+          </section>
+        `;
+      }
 
       if (!data.recomendacion.toLowerCase().includes("riesgo")) {
         html += `
@@ -151,7 +241,7 @@
             <p><strong>Tramo según ventas:</strong> ${data.tramo}</p>
             <p><strong>Promedio de pago empresas similares:</strong> ${data.promedio_empresas_similares.toFixed(2)} días</p>
             <p><strong>Desviación estándar:</strong> ${data.desviacion_empresas_similares.toFixed(2)} días</p>
-            <p><strong>Cantidad de empresas similares consideradas:</strong> ${data.cantidad_empresas_similares}</p>
+            <p><strong>Cantidad de pagos de empresas similares considerados:</strong> ${data.cantidad_empresas_similares}</p>
           </section>
         `;
       }
@@ -222,32 +312,32 @@
     }
 
     function simular(plazoRecomendado) {
-      const plazo = parseInt(document.getElementById('plazo').value);
-      const anticipo = parseFloat(document.getElementById('anticipo').value);
-      const resultado = document.getElementById('evaluacionResultado');
-      const confirmarBtn = document.getElementById('confirmarBtn');
+  const plazo = parseInt(document.getElementById('plazo').value);
+  const anticipo = parseFloat(document.getElementById('anticipo').value);
+  const resultado = document.getElementById('evaluacionResultado');
+  const confirmarBtn = document.getElementById('confirmarBtn');
 
-      if (isNaN(plazo) || isNaN(anticipo)) {
-        alert("Por favor ingrese valores válidos para plazo y anticipo.");
-        return;
-      }
+  if (isNaN(plazo) || isNaN(anticipo)) {
+    alert("Por favor ingrese valores válidos para plazo y anticipo.");
+    return;
+  }
 
-      const dias_extra = Math.ceil((100 - anticipo) * 7.5);
-      const total = plazo + dias_extra;
+  const dias_extra = Math.ceil((100 - anticipo) * 15);
+  const total = plazo + dias_extra;
 
-      if (total >= plazoRecomendado) {
-        simulacionAprobada = true;
-        confirmarBtn.disabled = false;
-        resultado.innerHTML = `<p class="text-green-700">✅ Plazo y anticipo aprobados (total: ${total} días vs recomendado: ${plazoRecomendado}).</p>`;
-      } else {
-        simulacionAprobada = false;
-        confirmarBtn.disabled = true;
-        resultado.innerHTML = `<p class="text-red-600">⚠️ El plazo y anticipo sugeridos no alcanzan lo recomendado (${total} vs ${plazoRecomendado}). Revise con riesgo.</p>`;
-      }
-    }
+  simulacionAprobada = total >= plazoRecomendado;
+  confirmarBtn.disabled = false;
+
+  if (simulacionAprobada) {
+    resultado.innerHTML = `<p class="text-green-700">✅ Plazo y anticipo aprobados (total: ${total} días vs recomendado: ${plazoRecomendado}).</p>`;
+  } else {
+    resultado.innerHTML = `<p class="text-red-600">⚠️ El plazo y anticipo sugeridos no alcanzan lo recomendado (${total} vs ${plazoRecomendado}). Revise con riesgo.</p>`;
+  }
+}
+
 
     function confirmarSimulacion() {
-      if (!simulacionAprobada) return;
+      
       document.getElementById('plazo').disabled = true;
       document.getElementById('anticipo').disabled = true;
       document.getElementById('confirmarBtn').disabled = true;
