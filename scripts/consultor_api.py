@@ -241,6 +241,25 @@ async def guardar_archivo(file: UploadFile, tipo: str):
         with open(ruta, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        return {"mensaje": f"✅ Archivo {filename} subido para {tipo}."}
+        # Procesar archivo inmediatamente después de guardar
+        if tipo == "list docs":
+            from cargar_datos import cargar_excel, insertar_documentos
+            df = cargar_excel(ruta)
+            if not df.empty:
+                insertar_documentos(df, filename)
+
+        elif tipo == "cartola":
+            from cargar_pagos import cargar_y_limpiar_excel, insertar_documentos
+            df = cargar_y_limpiar_excel(ruta)
+            if not df.empty:
+                insertar_documentos(df, filename)
+
+        elif tipo == "empresas":
+            from cargar_empresas import procesar_txt
+            procesar_txt(ruta)  # Debes crear esta función en cargar_empresas.py
+
+        return {"mensaje": f"✅ Archivo {filename} subido y procesado."}
+
     except Exception as e:
         return {"mensaje": f"❌ Error al subir archivo: {str(e)}"}
+
