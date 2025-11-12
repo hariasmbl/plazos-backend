@@ -6,12 +6,12 @@ from datetime import datetime
 import numpy as np
 import os
 import shutil
-from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad  # ✅ nuevas funciones desde consultor.py
+from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad  # ✅ Integración con consultor.py
 
 UPLOAD_FOLDER = "data"
 
 # ---------------------------------------
-# 🔧 Conexión Mongo
+# 🔧 Conexión MongoDB
 # ---------------------------------------
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
@@ -46,7 +46,7 @@ def read_root():
     return {"status": "ok"}
 
 # ---------------------------------------
-# 🧮 Funciones auxiliares
+# 🧩 Funciones auxiliares
 # ---------------------------------------
 def parse_fecha(fecha):
     if isinstance(fecha, str):
@@ -124,9 +124,8 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         plazo_recomendado_base = max(30, round(promedio_ultimos + 0.5 * desviacion))
 
         # -------------------------------------------
-        # 🧩 Aplicar reglas especiales de verano
+        # 🧩 Reglas especiales de verano
         # -------------------------------------------
-        # Calcular promedio de meses noviembre–febrero
         registros_verano = [r for r in registros_limpios if r["fecha_pago"].month in [11, 12, 1, 2]]
         promedio_verano = np.mean([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
 
@@ -135,21 +134,25 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         plazo_especial = reglas.get("plazo_recomendado")
         factor_dias = reglas.get("factor_dias")
 
-        # Si no aplica regla especial, usamos la base normal
         plazo_recomendado = plazo_especial if plazo_especial else plazo_recomendado_base
         factor_dias = factor_dias or 15
 
         # -------------------------------------------
-        # 🧾 Morosos
+        # 🧾 Morosos (filtrados)
         # -------------------------------------------
         morosos = list(docs.find({"RUT DEUDOR": rut, "ESTADO": "MOROSO"}))
         facturas_morosas = []
         for m in morosos:
+            clave_m = (m.get("Nº DCTO"), m.get("Nº OPE"))
+            if clave_m in pagos_dict:
+                continue  # ya pagada
             emision = parse_fecha(m.get("FEC EMISION DIG"))
             cesion = parse_fecha(m.get("FECHA CES"))
             vcto_nom = parse_fecha(m.get("VCTO NOM"))
             monto = m.get("MONTO DOC")
             saldo = m.get("SALDO")
+            if not saldo or saldo <= 0:
+                continue  # sin saldo
             dias_vencido = (datetime.today() - emision).days if emision else None
             dias_mora = (datetime.today() - vcto_nom).days if vcto_nom else None
             facturas_morosas.append({
@@ -200,7 +203,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         }
 
     # -------------------------------------------
-    # Si no hay historial, buscar en empresas_chile
+    # Si no hay historial, usar empresas similares
     # -------------------------------------------
     empresa = empresas_chile.find_one({"rut": rut})
     if not empresa:
@@ -256,7 +259,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
     }
 
 # ---------------------------------------
-# 📁 Subida de archivos
+# 📂 Subida de archivos
 # ---------------------------------------
 @app.post("/subir-docs")
 async def subir_docs(file: UploadFile = File(...)):
