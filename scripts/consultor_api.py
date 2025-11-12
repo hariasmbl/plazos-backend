@@ -88,7 +88,11 @@ tramos_uf = {
 def consultar_por_rut(rut: str = Query(..., alias="rut")):
     facturas = list(docs.find({"RUT DEUDOR": rut}))
     pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
-    pagos_dict = {(p.get("Nª Doc."), p.get("Nº Ope.")): p for p in pagos_deudor if p.get("Estado") == "PAGADO"}
+    pagos_dict = {
+        (p.get("Nª Doc."), p.get("Nº Ope.")): p
+        for p in pagos_deudor
+        if p.get("Estado") == "PAGADO"
+    }
 
     registros_validos = []
     for f in facturas:
@@ -109,50 +113,50 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
                     "monto": monto
                 })
 
+    # ======================================================
+    # === CASO 1: RUT CON HISTORIAL DE PAGOS ===============
+    # ======================================================
     if registros_validos:
         plazos = [r["plazo"] for r in registros_validos]
         promedio = np.mean(plazos)
         desviacion = np.std(plazos)
         registros_limpios = [r for r in registros_validos if not es_outlier(r["plazo"], promedio, desviacion)]
-
         if not registros_limpios:
             return {"error": "Todos los registros fueron considerados outliers."}
 
         registros_limpios.sort(key=lambda x: x["fecha_pago"], reverse=True)
         ultimos_5 = registros_limpios[:5]
         promedio_ultimos = np.mean([r["plazo"] for r in ultimos_5])
-        plazo_recomendado_base = max(30, round(promedio_ultimos + 0.5 * desviacion))
 
-        # -------------------------------------------
-        # 🧩 Reglas especiales de verano
-        # -------------------------------------------
+        # --- Promedio de pagos en meses de verano (nov-feb) ---
         registros_verano = [r for r in registros_limpios if r["fecha_pago"].month in [11, 12, 1, 2]]
         promedio_verano = np.mean([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
 
+        # --- Aplicar reglas especiales de verano (MOP / Municipios / Corp) ---
+        from scripts.consultor import aplicar_reglas_verano
         reglas = aplicar_reglas_verano(rut, promedio_verano, promedio)
-        tipo_entidad = reglas.get("tipo")
-        plazo_especial = reglas.get("plazo_recomendado")
-        factor_dias = reglas.get("factor_dias")
 
-        plazo_recomendado = plazo_especial if plazo_especial else plazo_recomendado_base
-        factor_dias = factor_dias or 15
+        # --- Determinar plazo recomendado según tipo ---
+        if reglas["plazo_recomendado"] == -1 or reglas["plazo_recomendado"] is None:
+            plazo_recomendado = max(30, round(promedio_ultimos + 0.5 * desviacion))
+        else:
+            plazo_recomendado = reglas["plazo_recomendado"]
 
-        # -------------------------------------------
-        # 🧾 Morosos (filtrados)
-        # -------------------------------------------
+        factor_dias = reglas["factor_dias"]
+        tipo = reglas["tipo"]
+
+        # --- Facturas morosas ---
         morosos = list(docs.find({"RUT DEUDOR": rut, "ESTADO": "MOROSO"}))
         facturas_morosas = []
         for m in morosos:
             clave_m = (m.get("Nº DCTO"), m.get("Nº OPE"))
             if clave_m in pagos_dict:
-                continue  # ya pagada
+                continue
             emision = parse_fecha(m.get("FEC EMISION DIG"))
             cesion = parse_fecha(m.get("FECHA CES"))
             vcto_nom = parse_fecha(m.get("VCTO NOM"))
             monto = m.get("MONTO DOC")
             saldo = m.get("SALDO")
-            if not saldo or saldo <= 0:
-                continue  # sin saldo
             dias_vencido = (datetime.today() - emision).days if emision else None
             dias_mora = (datetime.today() - vcto_nom).days if vcto_nom else None
             facturas_morosas.append({
@@ -164,22 +168,23 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
                 "dias_mora": dias_mora
             })
 
+        # --- Riesgo detectado si alguna mora supera plazo recomendado ---
         hay_riesgo = any(
-            m.get("dias_vencido") and m["dias_vencido"] > plazo_recomendado
+            m.get("dias_vencido") and plazo_recomendado and m["dias_vencido"] > plazo_recomendado
             for m in facturas_morosas
         )
 
         recomendacion = (
-            f"Se recomienda cubrir {plazo_recomendado} días entre plazo y anticipo"
-            if not hay_riesgo else
-            f"Hay documentos morosos que superan el plazo recomendado ({plazo_recomendado} días), revisar con riesgo"
+            "Hay documentos morosos que superan el plazo recomendado, revisar plazo y anticipo con riesgo"
+            if hay_riesgo
+            else f"Se recomienda cubrir {plazo_recomendado} días entre plazo y anticipo"
         )
 
         factura_lenta = max(registros_limpios, key=lambda x: x["plazo"])
 
         return {
             "nombre_deudor": facturas[0].get("DEUDOR", "Desconocido"),
-            "tipo_entidad": tipo_entidad,
+            "tipo_entidad": tipo,
             "promedio_verano": promedio_verano,
             "factor_dias": factor_dias,
             "ultimos_pagos": [
@@ -202,16 +207,32 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             "riesgo_detectado": hay_riesgo
         }
 
-    # -------------------------------------------
-    # Si no hay historial, usar empresas similares
-    # -------------------------------------------
+    # ======================================================
+    # === CASO 2: RUT SIN HISTORIAL ========================
+    # ======================================================
     empresa = empresas_chile.find_one({"rut": rut})
     if not empresa:
-        return {"error": "RUT no tiene historial ni está registrado en la base de empresas."}
+        return {
+            "error": "RUT no tiene historial ni está registrado en la base de empresas.",
+            "plazo_recomendado": 30,
+            "recomendacion": "No existe información histórica. Se recomienda usar un plazo base de 30 días."
+        }
 
     rubro = empresa.get("rubro")
     tramo = empresa.get("tramo_ventas")
 
+    if not rubro or not tramo:
+        return {
+            "nombre_deudor": empresa.get("nombre", "Desconocido"),
+            "error": "Faltan datos de rubro o tramo de ventas.",
+            "recomendacion": "No es posible estimar plazo por similitud. Utilice el plazo base de 30 días.",
+            "plazo_recomendado": 30,
+            "ultimos_pagos": [],
+            "morosos": [],
+            "empresas_similares": False
+        }
+
+    # --- Buscar empresas similares ---
     similares = list(empresas_chile.find({"rubro": rubro, "tramo_ventas": tramo}))
     ruts_similares = [e["rut"] for e in similares if "rut" in e]
 
@@ -231,14 +252,29 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
                 plazos_similares.append(plazo)
 
     if not plazos_similares:
-        return {"error": "No hay datos de pago para empresas similares."}
+        return {
+            "nombre_deudor": empresa.get("nombre", "Desconocido"),
+            "error": "No se encontraron pagos de empresas similares.",
+            "recomendacion": "No es posible estimar plazo. Se recomienda usar 30 días como base.",
+            "plazo_recomendado": 30,
+            "ultimos_pagos": [],
+            "morosos": [],
+            "empresas_similares": False
+        }
 
+    # --- Cálculo para empresas similares ---
     promedio_bruto = np.mean(plazos_similares)
     desviacion_bruto = np.std(plazos_similares)
     plazos_limpios = [p for p in plazos_similares if not es_outlier(p, promedio_bruto, desviacion_bruto)]
 
     if not plazos_limpios:
-        return {"error": "No hay datos confiables (sin outliers) para empresas similares."}
+        return {
+            "nombre_deudor": empresa.get("nombre", "Desconocido"),
+            "error": "Datos insuficientes para estimar plazo confiable.",
+            "recomendacion": "Se recomienda usar 30 días como base.",
+            "plazo_recomendado": 30,
+            "empresas_similares": False
+        }
 
     promedio = np.mean(plazos_limpios)
     desviacion = np.std(plazos_limpios)

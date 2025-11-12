@@ -88,13 +88,14 @@ def aplicar_reglas_verano(rut, promedio_verano, promedio_anual):
     mes = datetime.now().month
     tipo = obtener_tipo_entidad(rut)
 
-    # Solo noviembre–febrero aplican reglas
+    # Solo noviembre–febrero aplican reglas especiales
     if mes not in [11, 12, 1, 2]:
         return {"plazo_recomendado": None, "factor_dias": 15, "tipo": tipo}
 
     # Si no es MOP, Municipalidad o Corp, usar reglas normales
     if tipo not in ["MOP", "MUNICIPALIDAD", "CORP MUNICIPAL"]:
-        return {"plazo_recomendado": None, "factor_dias": 15, "tipo": tipo}
+        # 💡 Ya no devolvemos None como plazo, devolvemos -1 para indicar “normal”
+        return {"plazo_recomendado": -1, "factor_dias": 15, "tipo": tipo}
 
     # Reglas para MOP
     if tipo == "MOP":
