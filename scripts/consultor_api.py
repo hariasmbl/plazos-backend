@@ -169,10 +169,14 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             })
 
         # --- Riesgo detectado si alguna mora supera plazo recomendado ---
+        # --- Riesgo detectado si alguna mora supera plazo recomendado ---
         hay_riesgo = any(
-            m.get("dias_vencido") and plazo_recomendado and m["dias_vencido"] > plazo_recomendado
+            isinstance(m.get("dias_vencido"), (int, float)) and
+            isinstance(plazo_recomendado, (int, float)) and
+            m["dias_vencido"] > plazo_recomendado
             for m in facturas_morosas
         )
+
 
         recomendacion = (
             "Hay documentos morosos que superan el plazo recomendado, revisar plazo y anticipo con riesgo"
