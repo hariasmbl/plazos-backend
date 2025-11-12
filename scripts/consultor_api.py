@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query,UploadFile, File
+from fastapi import FastAPI, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 from dotenv import load_dotenv
@@ -6,40 +6,48 @@ from datetime import datetime
 import numpy as np
 import os
 import shutil
+from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad  # ✅ nuevas funciones desde consultor.py
 
 UPLOAD_FOLDER = "data"
 
-# Configuración inicial
+# ---------------------------------------
+# 🔧 Conexión Mongo
+# ---------------------------------------
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    client.server_info()  # Fuerza conexión para detectar error de inmediato
+    client.server_info()
     print("✅ Conexión con MongoDB Atlas OK")
 except Exception as e:
     print("❌ Error al conectar con MongoDB:", e)
     raise e
+
 db = client["mi_base_datos"]
 docs = db["docs"]
 pagos = db["pagos"]
 empresas_chile = db["empresas"]
 
+# ---------------------------------------
+# ⚙️ Configuración FastAPI
+# ---------------------------------------
 app = FastAPI()
-
-@app.get("/")
-def read_root():
-    return {"status": "ok"}
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://plazos-bl.web.app"  # frontend en producción
-    ],
+    allow_origins=["https://plazos-bl.web.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+@app.get("/")
+def read_root():
+    return {"status": "ok"}
+
+# ---------------------------------------
+# 🧮 Funciones auxiliares
+# ---------------------------------------
 def parse_fecha(fecha):
     if isinstance(fecha, str):
         for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
@@ -73,6 +81,9 @@ tramos_uf = {
     "13": "4to Rango Gran Empresa: más de 1.000.000,01 UF anuales"
 }
 
+# ---------------------------------------
+# 🔍 CONSULTAR RUT
+# ---------------------------------------
 @app.get("/consultar-rut")
 def consultar_por_rut(rut: str = Query(..., alias="rut")):
     facturas = list(docs.find({"RUT DEUDOR": rut}))
@@ -103,20 +114,37 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         promedio = np.mean(plazos)
         desviacion = np.std(plazos)
         registros_limpios = [r for r in registros_validos if not es_outlier(r["plazo"], promedio, desviacion)]
+
         if not registros_limpios:
             return {"error": "Todos los registros fueron considerados outliers."}
 
         registros_limpios.sort(key=lambda x: x["fecha_pago"], reverse=True)
         ultimos_5 = registros_limpios[:5]
         promedio_ultimos = np.mean([r["plazo"] for r in ultimos_5])
-        plazo_recomendado = max(30, round(promedio_ultimos + 0.5 * desviacion))
+        plazo_recomendado_base = max(30, round(promedio_ultimos + 0.5 * desviacion))
 
+        # -------------------------------------------
+        # 🧩 Aplicar reglas especiales de verano
+        # -------------------------------------------
+        # Calcular promedio de meses noviembre–febrero
+        registros_verano = [r for r in registros_limpios if r["fecha_pago"].month in [11, 12, 1, 2]]
+        promedio_verano = np.mean([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
+
+        reglas = aplicar_reglas_verano(rut, promedio_verano, promedio)
+        tipo_entidad = reglas.get("tipo")
+        plazo_especial = reglas.get("plazo_recomendado")
+        factor_dias = reglas.get("factor_dias")
+
+        # Si no aplica regla especial, usamos la base normal
+        plazo_recomendado = plazo_especial if plazo_especial else plazo_recomendado_base
+        factor_dias = factor_dias or 15
+
+        # -------------------------------------------
+        # 🧾 Morosos
+        # -------------------------------------------
         morosos = list(docs.find({"RUT DEUDOR": rut, "ESTADO": "MOROSO"}))
         facturas_morosas = []
         for m in morosos:
-            clave_m = (m.get("Nº DCTO"), m.get("Nº OPE"))
-            if clave_m in pagos_dict:
-                continue
             emision = parse_fecha(m.get("FEC EMISION DIG"))
             cesion = parse_fecha(m.get("FECHA CES"))
             vcto_nom = parse_fecha(m.get("VCTO NOM"))
@@ -139,15 +167,18 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         )
 
         recomendacion = (
-            "Hay documentos morosos que superan el plazo recomendado, revisar plazo y anticipo con riesgo"
-            if hay_riesgo else
             f"Se recomienda cubrir {plazo_recomendado} días entre plazo y anticipo"
+            if not hay_riesgo else
+            f"Hay documentos morosos que superan el plazo recomendado ({plazo_recomendado} días), revisar con riesgo"
         )
 
         factura_lenta = max(registros_limpios, key=lambda x: x["plazo"])
 
         return {
             "nombre_deudor": facturas[0].get("DEUDOR", "Desconocido"),
+            "tipo_entidad": tipo_entidad,
+            "promedio_verano": promedio_verano,
+            "factor_dias": factor_dias,
             "ultimos_pagos": [
                 {
                     "monto": r["monto"],
@@ -168,7 +199,9 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             "riesgo_detectado": hay_riesgo
         }
 
+    # -------------------------------------------
     # Si no hay historial, buscar en empresas_chile
+    # -------------------------------------------
     empresa = empresas_chile.find_one({"rut": rut})
     if not empresa:
         return {"error": "RUT no tiene historial ni está registrado en la base de empresas."}
@@ -219,8 +252,12 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         "plazo_recomendado": plazo_recomendado,
         "ultimos_pagos": [],
         "morosos": [],
-        "empresas_similares": True  # ← Esta línea activa la sección en el frontend
+        "empresas_similares": True
     }
+
+# ---------------------------------------
+# 📁 Subida de archivos
+# ---------------------------------------
 @app.post("/subir-docs")
 async def subir_docs(file: UploadFile = File(...)):
     return await guardar_archivo(file, "list docs")
@@ -237,41 +274,28 @@ async def guardar_archivo(file: UploadFile, tipo: str):
     try:
         filename = file.filename
         ruta = os.path.join(UPLOAD_FOLDER, filename)
-
         with open(ruta, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        # Procesar archivo inmediatamente después de guardar
         if tipo == "list docs":
             from scripts.cargar_datos import cargar_excel, insertar_documentos
             df = cargar_excel(ruta)
             if not df.empty:
                 resumen = insertar_documentos(df, filename)
-                return {
-                    "mensaje": f"✅ Archivo {filename} subido y procesado.",
-                    "resumen": resumen
-                }
+                return {"mensaje": f"✅ Archivo {filename} subido y procesado.", "resumen": resumen}
 
         elif tipo == "cartola":
             from scripts.cargar_pagos import cargar_y_limpiar_excel, insertar_documentos
             df = cargar_y_limpiar_excel(ruta)
             if not df.empty:
                 resumen = insertar_documentos(df, filename)
-                return {
-                    "mensaje": f"✅ Archivo {filename} subido y procesado.",
-                    "resumen": resumen
-                }
+                return {"mensaje": f"✅ Archivo {filename} subido y procesado.", "resumen": resumen}
 
         elif tipo == "empresas":
             from scripts.cargar_empresas import procesar_txt
             procesar_txt(ruta)
-            return {
-                "mensaje": f"✅ Archivo {filename} subido y empresas actualizadas."
-            }
+            return {"mensaje": f"✅ Archivo {filename} subido y empresas actualizadas."}
 
         return {"mensaje": f"⚠️ El archivo {filename} no contenía datos válidos."}
-
     except Exception as e:
         return {"mensaje": f"❌ Error al subir archivo: {str(e)}"}
-
-
