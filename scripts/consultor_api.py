@@ -35,7 +35,11 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://plazos-bl.web.app"],
+    allow_origins=[
+        "https://plazos-bl.web.app",
+        "https://plazos-bl.firebaseapp.com",
+        "http://localhost:5173",  # para pruebas locales con Vite o similar
+        "http://localhost:5000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -144,7 +148,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
 
         factor_dias = reglas.get("factor_dias", 15)
         tipo = reglas.get("tipo") or "NORMAL"
-        
+
         # --- Facturas morosas ---
         morosos = list(docs.find({"RUT DEUDOR": rut, "ESTADO": "MOROSO"}))
         facturas_morosas = []
