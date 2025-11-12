@@ -39,28 +39,45 @@ def es_outlier(valor, promedio, desviacion):
 # -----------------------------
 
 def obtener_tipo_entidad(rut):
-    try:
-        ruta_excel = r"C:\Users\Damsoft\Desktop\Plazos\data\clasificaciones\clasificacion_bl.xlsx"
-        df = pd.read_excel(ruta_excel)
-        df["RUT"] = df["RUT"].astype(str).str.strip().str.upper()
-        df["CLASIFICACIÓN BL 2"] = df["CLASIFICACIÓN BL 2"].astype(str).str.upper()
-        rut = str(rut).strip().upper()
+    rut = str(rut).replace(".", "").strip().upper()
 
+    try:
+        # 🔹 1. Detectar MOP directamente
         if rut in ["61202000-0", "61.202.000-0", "612020000"]:
+            print("✅ Detectado MOP por RUT")
             return "MOP"
 
-        fila = df.loc[df["RUT"] == rut]
-        if fila.empty:
-            return None
+        # 🔹 2. Detectar municipalidades / corporaciones por nombre en Mongo
+        doc = docs.find_one({"RUT DEUDOR": rut})
+        if doc:
+            nombre = str(doc.get("DEUDOR", "")).upper()
+            if "MUNICIPALIDAD" in nombre:
+                print(f"✅ Detectada MUNICIPALIDAD por nombre: {nombre[:50]}")
+                return "MUNICIPALIDAD"
+            if "CORP" in nombre and "MUNICIPAL" in nombre:
+                print(f"✅ Detectada CORP MUNICIPAL por nombre: {nombre[:50]}")
+                return "CORP MUNICIPAL"
 
-        clasif = str(fila.iloc[0]["CLASIFICACIÓN BL 2"]).upper()
-        if "MUNICIPALIDADES" in clasif:
-            return "MUNICIPALIDAD"
-        elif "CORP MUNICIPAL" in clasif:
-            return "CORP MUNICIPAL"
+        # 🔹 3. Intentar leer Excel solo si existe
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        ruta_excel = os.path.join(base_dir, "..", "data", "clasificaciones", "clasificacion_bl.xlsx")
+
+        if os.path.exists(ruta_excel):
+            df = pd.read_excel(ruta_excel)
+            df["RUT"] = df["RUT"].astype(str).str.replace(".", "", regex=False).str.strip().str.upper()
+            fila = df.loc[df["RUT"] == rut]
+            if not fila.empty:
+                clasif = str(fila.iloc[0].get("CLASIFICACIÓN BL 2", "")).upper()
+                if "MUNICIPALIDAD" in clasif:
+                    return "MUNICIPALIDAD"
+                elif "CORP" in clasif:
+                    return "CORP MUNICIPAL"
+        else:
+            print(f"⚠️ Archivo clasificacion_bl.xlsx no encontrado en {ruta_excel}")
 
     except Exception as e:
-        print(f"⚠️ No se pudo leer el archivo de clasificación: {e}")
+        print(f"⚠️ Error al detectar tipo de entidad ({rut}): {e}")
+
     return None
 
 # -----------------------------
