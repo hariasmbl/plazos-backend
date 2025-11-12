@@ -142,9 +142,9 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         else:
             plazo_recomendado = reglas["plazo_recomendado"]
 
-        factor_dias = reglas["factor_dias"]
-        tipo = reglas["tipo"]
-
+        factor_dias = reglas.get("factor_dias", 15)
+        tipo = reglas.get("tipo") or "NORMAL"
+        
         # --- Facturas morosas ---
         morosos = list(docs.find({"RUT DEUDOR": rut, "ESTADO": "MOROSO"}))
         facturas_morosas = []

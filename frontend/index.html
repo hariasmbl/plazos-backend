@@ -354,28 +354,35 @@
     }
 
     function simular(plazoRecomendado) {
-  const plazo = parseInt(document.getElementById('plazo').value);
-  const anticipo = parseFloat(document.getElementById('anticipo').value);
-  const resultado = document.getElementById('evaluacionResultado');
-  const confirmarBtn = document.getElementById('confirmarBtn');
+      const plazo = parseInt(document.getElementById('plazo').value);
+      const anticipo = parseFloat(document.getElementById('anticipo').value);
+      const resultado = document.getElementById('evaluacionResultado');
+      const confirmarBtn = document.getElementById('confirmarBtn');
 
-  if (isNaN(plazo) || isNaN(anticipo)) {
-    alert("Por favor ingrese valores válidos para plazo y anticipo.");
-    return;
-  }
+      if (isNaN(plazo) || isNaN(anticipo)) {
+        alert("Por favor ingrese valores válidos para plazo y anticipo.");
+        return;
+      }
 
-  const dias_extra = Math.ceil((100 - anticipo) * 15);
-  const total = plazo + dias_extra;
+      // 📆 Regla especial de verano (noviembre a febrero)
+      const factorDias = data.factor_dias || 15;
 
-  simulacionAprobada = total >= plazoRecomendado;
-  confirmarBtn.disabled = false;
+      const dias_extra = Math.ceil((100 - anticipo) * factorDias);
+      const total = plazo + dias_extra;
 
-  if (simulacionAprobada) {
-    resultado.innerHTML = `<p class="text-green-700">✅ Plazo y anticipo aprobados (total: ${total} días vs recomendado: ${plazoRecomendado}).</p>`;
-  } else {
-    resultado.innerHTML = `<p class="text-red-600">⚠️ El plazo y anticipo sugeridos no alcanzan lo recomendado (${total} vs ${plazoRecomendado}). Revise con riesgo.</p>`;
-  }
-}
+      simulacionAprobada = total >= plazoRecomendado;
+      confirmarBtn.disabled = false;
+
+      // Mostrar detalle siempre, incluso si no aprueba
+      resultado.innerHTML = `<p class="text-gray-700">Estás simulando <strong>${total}</strong> días entre plazo y anticipo.</p>`;
+
+      if (simulacionAprobada) {
+        resultado.innerHTML += `<p class="text-green-700">✅ Aprobado: el total (${total}) cubre o supera lo recomendado (${plazoRecomendado}).</p>`;
+      } else {
+        resultado.innerHTML += `<p class="text-red-600">⚠️ No aprobado: el total (${total}) es menor al recomendado (${plazoRecomendado}). Revise con riesgo.</p>`;
+      }
+    }
+
 
 
     function confirmarSimulacion() {
