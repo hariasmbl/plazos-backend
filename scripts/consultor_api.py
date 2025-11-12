@@ -142,8 +142,11 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         # Promedio solo en meses de verano
         registros_verano = [r for r in registros_limpios if r["fecha_pago"].month in [11, 12, 1, 2]]
         promedio_verano = np.mean([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
+        desviacion_verano = np.std([r["plazo"] for r in registros_verano]) if registros_verano else None
 
-        reglas = aplicar_reglas_verano(rut, promedio_verano, promedio)
+        # Aplicar reglas con desviación incluida
+
+        reglas = aplicar_reglas_verano(rut, promedio_verano, promedio, desviacion_verano, desviacion)
         plazo_regla = reglas.get("plazo_recomendado")
         factor_dias = reglas.get("factor_dias", 15)
         tipo = reglas.get("tipo") or "NORMAL"
