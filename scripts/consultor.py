@@ -46,7 +46,7 @@ def obtener_tipo_entidad(rut):
         df["CLASIFICACIÓN BL 2"] = df["CLASIFICACIÓN BL 2"].astype(str).str.upper()
         rut = str(rut).strip().upper()
 
-        if rut == "61202000-0":
+        if rut in ["61202000-0", "61.202.000-0", "612020000"]:
             return "MOP"
 
         fila = df.loc[df["RUT"] == rut]
