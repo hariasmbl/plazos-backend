@@ -2,7 +2,6 @@ from pymongo import MongoClient
 from dotenv import load_dotenv
 from datetime import datetime
 import numpy as np
-import pandas as pd
 import os
 import hashlib
 
@@ -13,16 +12,6 @@ client = MongoClient(MONGO_URI)
 db = client["mi_base_datos"]
 docs = db["docs"]
 pagos = db["pagos"]
-
-# Ruta al archivo de clasificaciones BL
-RUTA_CLASIFICACION = r"C:\Users\Damsoft\Desktop\Plazos\data\clasificaciones\clasificacion_bl.xlsx"
-
-try:
-    clasificacion_df = pd.read_excel(RUTA_CLASIFICACION, dtype=str)
-    clasificacion_df.columns = clasificacion_df.columns.str.strip().str.upper()
-except Exception as e:
-    print(f"⚠️ No se pudo cargar el archivo de clasificación BL: {e}")
-    clasificacion_df = pd.DataFrame(columns=["RUT", "CLASIFICACIÓN BL 2"])
 
 # -----------------------------
 # Utilidades
@@ -39,78 +28,11 @@ def parse_fecha(fecha):
         return fecha
     return None
 
-
 def es_outlier(valor, promedio, desviacion):
     if desviacion == 0:
         return False
     z = (valor - promedio) / desviacion
     return abs(z) > 2.0
-
-
-# -----------------------------
-# Función auxiliar: reglas especiales verano
-# -----------------------------
-
-def reglas_especiales_verano(rut_deudor, registros_validos):
-    """Aplica las reglas de verano solo para MOP y Municipalidades."""
-    mes_actual = datetime.now().month
-    meses_especiales = [11, 12, 1, 2]
-    if mes_actual not in meses_especiales:
-        return None
-
-    rut_normalizado = rut_deudor.replace(".", "").strip().upper()
-    clasificacion = None
-
-    # Buscar clasificación en archivo Excel
-    if rut_normalizado == "61202000-0":
-        clasificacion = "MOP"
-    else:
-        fila = clasificacion_df.loc[clasificacion_df["RUT"].str.upper() == rut_normalizado]
-        if not fila.empty:
-            clasificacion = fila.iloc[0]["CLASIFICACIÓN BL 2"].strip().upper()
-
-    if not clasificacion:
-        return None
-
-    # --- MOP ---
-    if clasificacion == "MOP":
-        return {
-            "plazo_recomendado": 60,
-            "recomendacion": "Operar con 60 días entre plazo y anticipo (MOP)"
-        }
-
-    # --- MUNICIPALIDADES / CORP MUNICIPAL ---
-    if clasificacion in ["MUNICIPALIDADES", "CORP MUNICIPAL"]:
-        registros_verano = [
-            r for r in registros_validos
-            if r["fecha_ces"] and r["fecha_ces"].month in [11, 12, 1, 2]
-        ]
-        # Si no hay registros nov–feb, usar todo el año
-        if registros_verano:
-            promedio_ref = np.mean([r["plazo"] for r in registros_verano])
-        else:
-            promedio_ref = np.mean([r["plazo"] for r in registros_validos])
-
-        if promedio_ref <= 45:
-            plazo = 45
-            rec = "Operar con 45 días entre plazo y anticipo (Municipalidad/Corp)"
-        elif 46 <= promedio_ref <= 70:
-            plazo = 90
-            rec = "Operar con 90 días entre plazo y anticipo (Municipalidad/Corp)"
-        elif 71 <= promedio_ref <= 90:
-            plazo = 105
-            rec = "Operar con 105 días entre plazo y anticipo (Municipalidad/Corp)"
-        else:
-            plazo = None
-            rec = "Evaluar puntualmente (Municipalidad/Corp con promedio > 90 días)"
-
-        return {
-            "plazo_recomendado": plazo,
-            "recomendacion": rec
-        }
-
-    return None
-
 
 # -----------------------------
 # Función principal
@@ -163,6 +85,7 @@ def consultar_por_rut(rut_deudor):
     registros_limpios = [
         r for r in registros_validos if not es_outlier(r["plazo"], promedio_total, desviacion_total)
     ]
+
     if not registros_limpios:
         print("⚠️ Todos los registros fueron considerados outliers.")
         return
@@ -172,16 +95,8 @@ def consultar_por_rut(rut_deudor):
     ultimos_5 = registros_limpios[:5]
     promedio_ultimos = np.mean([r["plazo"] for r in ultimos_5])
 
-    # Factura más lenta
+    # Factura con mayor demora
     factura_lenta = max(registros_limpios, key=lambda x: x["plazo"])
-
-    # Reglas especiales verano
-    regla = reglas_especiales_verano(rut_deudor, registros_limpios)
-    if regla:
-        print(f"\n⚙️ Aplicando regla especial de verano: {regla['recomendacion']}")
-        plazo_recomendado = regla["plazo_recomendado"]
-    else:
-        plazo_recomendado = round(promedio_ultimos)
 
     # -----------------------------
     # Resultados
@@ -206,7 +121,7 @@ def consultar_por_rut(rut_deudor):
     print(f"- Plazo: {factura_lenta['plazo']} días")
 
     # -------------------------------
-    # 🟥 Facturas Morosas
+    # 🟥 Sección adicional: MOROSOS
     # -------------------------------
     morosos = list(docs.find({
         "RUT DEUDOR": rut_deudor,
@@ -225,9 +140,4 @@ def consultar_por_rut(rut_deudor):
             dias_vencido = (datetime.today() - emision).days if emision else "N/A"
 
             print(f"- Monto: {monto:,.0f} | Saldo: {saldo:,.0f} | Compra: {cesion.date() if cesion else 'N/A'} | "
-                  f"Emisión: {emision.date() if emision else 'N/A'} | Días desde emisión: {dias_vencido}")
-
-            if isinstance(dias_vencido, int) and plazo_recomendado and dias_vencido > plazo_recomendado:
-                print(f"⚠️ Factura morosa supera el plazo recomendado de {plazo_recomendado} días → BLOQUEAR aprobación.")
-            else:
-                print("✅ Factura morosa dentro del rango permitido.")
+                  f"Emisión: {emision.date() if emision else 'N/A'} | Días desde la emisión: {dias_vencido}")
