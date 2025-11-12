@@ -121,120 +121,120 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
     # === CASO 1: RUT CON HISTORIAL DE PAGOS ===============
     # ======================================================
     if registros_validos:
-    plazos = [r["plazo"] for r in registros_validos]
-    promedio = np.mean(plazos)
-    desviacion = np.std(plazos)
-    registros_limpios = [r for r in registros_validos if not es_outlier(r["plazo"], promedio, desviacion)]
+        plazos = [r["plazo"] for r in registros_validos]
+        promedio = np.mean(plazos)
+        desviacion = np.std(plazos)
+        registros_limpios = [r for r in registros_validos if not es_outlier(r["plazo"], promedio, desviacion)]
 
-    if not registros_limpios:
-        return {"error": "Todos los registros fueron considerados outliers."}
+        if not registros_limpios:
+            return {"error": "Todos los registros fueron considerados outliers."}
 
-    registros_limpios.sort(key=lambda x: x["fecha_pago"], reverse=True)
-    ultimos_5 = registros_limpios[:5]
-    promedio_ultimos = np.mean([r["plazo"] for r in ultimos_5])
-    plazo_recomendado = max(30, round(promedio_ultimos + 0.5 * desviacion))
+        registros_limpios.sort(key=lambda x: x["fecha_pago"], reverse=True)
+        ultimos_5 = registros_limpios[:5]
+        promedio_ultimos = np.mean([r["plazo"] for r in ultimos_5])
+        plazo_recomendado = max(30, round(promedio_ultimos + 0.5 * desviacion))
 
-    # -------------------------------
-    # Integración con reglas de verano
-    # -------------------------------
-    from scripts.consultor import aplicar_reglas_verano
+        # -------------------------------
+        # Integración con reglas de verano
+        # -------------------------------
+        from scripts.consultor import aplicar_reglas_verano
 
-    # Promedio solo en meses de verano
-    registros_verano = [r for r in registros_limpios if r["fecha_pago"].month in [11, 12, 1, 2]]
-    promedio_verano = np.mean([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
+        # Promedio solo en meses de verano
+        registros_verano = [r for r in registros_limpios if r["fecha_pago"].month in [11, 12, 1, 2]]
+        promedio_verano = np.mean([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
 
-    reglas = aplicar_reglas_verano(rut, promedio_verano, promedio)
-    plazo_regla = reglas.get("plazo_recomendado")
-    factor_dias = reglas.get("factor_dias", 15)
-    tipo = reglas.get("tipo") or "NORMAL"
+        reglas = aplicar_reglas_verano(rut, promedio_verano, promedio)
+        plazo_regla = reglas.get("plazo_recomendado")
+        factor_dias = reglas.get("factor_dias", 15)
+        tipo = reglas.get("tipo") or "NORMAL"
 
-    # 🔧 Validación adicional para casos normales
-    if tipo == "NORMAL" and factor_dias == 7.5:
-        factor_dias = 15
+        # 🔧 Validación adicional para casos normales
+        if tipo == "NORMAL" and factor_dias == 7.5:
+            factor_dias = 15
 
-    if plazo_regla and not np.isnan(plazo_regla):
-        plazo_recomendado = plazo_regla
+        if plazo_regla and not np.isnan(plazo_regla):
+            plazo_recomendado = plazo_regla
 
-    # -------------------------------
-    # Facturas morosas
-    # -------------------------------
-    morosos = list(docs.find({"RUT DEUDOR": rut, "ESTADO": "MOROSO"}))
-    facturas_morosas = []
-    for m in morosos:
-        clave_m = (m.get("Nº DCTO"), m.get("Nº OPE"))
-        if clave_m in [(f.get("Nº DCTO"), f.get("Nº OPE")) for f in registros_validos]:
-            continue
-        emision = parse_fecha(m.get("FEC EMISION DIG"))
-        cesion = parse_fecha(m.get("FECHA CES"))
-        vcto_nom = parse_fecha(m.get("VCTO NOM"))
-        monto = m.get("MONTO DOC")
-        saldo = m.get("SALDO")
-        dias_vencido = (datetime.today() - emision).days if emision else None
-        dias_mora = (datetime.today() - vcto_nom).days if vcto_nom else None
-        facturas_morosas.append({
-            "monto": monto,
-            "saldo": saldo,
-            "fecha_ces": cesion,
-            "fecha_emision": emision,
-            "dias_vencido": dias_vencido,
-            "dias_mora": dias_mora
-        })
+        # -------------------------------
+        # Facturas morosas
+        # -------------------------------
+        morosos = list(docs.find({"RUT DEUDOR": rut, "ESTADO": "MOROSO"}))
+        facturas_morosas = []
+        for m in morosos:
+            clave_m = (m.get("Nº DCTO"), m.get("Nº OPE"))
+            if clave_m in [(f.get("Nº DCTO"), f.get("Nº OPE")) for f in registros_validos]:
+                continue
+            emision = parse_fecha(m.get("FEC EMISION DIG"))
+            cesion = parse_fecha(m.get("FECHA CES"))
+            vcto_nom = parse_fecha(m.get("VCTO NOM"))
+            monto = m.get("MONTO DOC")
+            saldo = m.get("SALDO")
+            dias_vencido = (datetime.today() - emision).days if emision else None
+            dias_mora = (datetime.today() - vcto_nom).days if vcto_nom else None
+            facturas_morosas.append({
+                "monto": monto,
+                "saldo": saldo,
+                "fecha_ces": cesion,
+                "fecha_emision": emision,
+                "dias_vencido": dias_vencido,
+                "dias_mora": dias_mora
+            })
 
-    hay_riesgo = any(
-        m.get("dias_vencido") and m["dias_vencido"] > plazo_recomendado
-        for m in facturas_morosas
-    )
+        hay_riesgo = any(
+            m.get("dias_vencido") and m["dias_vencido"] > plazo_recomendado
+            for m in facturas_morosas
+        )
 
-    recomendacion = (
-        "Hay documentos morosos que superan el plazo recomendado, revisar plazo y anticipo con riesgo"
-        if hay_riesgo else
-        f"Se recomienda cubrir {plazo_recomendado} días entre plazo y anticipo"
-    )
+        recomendacion = (
+            "Hay documentos morosos que superan el plazo recomendado, revisar plazo y anticipo con riesgo"
+            if hay_riesgo else
+            f"Se recomienda cubrir {plazo_recomendado} días entre plazo y anticipo"
+        )
 
-    factura_lenta = max(registros_limpios, key=lambda x: x["plazo"])
+        factura_lenta = max(registros_limpios, key=lambda x: x["plazo"])
 
-    # -------------------------------
-    # 🔧 Evitar errores por NaN o valores no serializables
-    # -------------------------------
-    def safe_num(x):
-        try:
-            if x is None or (isinstance(x, float) and np.isnan(x)):
+        # -------------------------------
+        # 🔧 Evitar errores por NaN o valores no serializables
+        # -------------------------------
+        def safe_num(x):
+            try:
+                if x is None or (isinstance(x, float) and np.isnan(x)):
+                    return 0
+                return float(x)
+            except Exception:
                 return 0
-            return float(x)
-        except Exception:
-            return 0
 
-    promedio_ultimos = safe_num(promedio_ultimos)
-    promedio = safe_num(promedio)
-    desviacion = safe_num(desviacion)
-    plazo_recomendado = safe_num(plazo_recomendado)
+        promedio_ultimos = safe_num(promedio_ultimos)
+        promedio = safe_num(promedio)
+        desviacion = safe_num(desviacion)
+        plazo_recomendado = safe_num(plazo_recomendado)
 
-    # -------------------------------
-    # Retorno final
-    # -------------------------------
-    return {
-        "nombre_deudor": facturas[0].get("DEUDOR", "Desconocido"),
-        "tipo_entidad": tipo,
-        "ultimos_pagos": [
-            {
-                "monto": r["monto"],
-                "fecha_ces": r["fecha_ces"],
-                "fecha_emision": r["fecha_emision"],
-                "fecha_pago": r["fecha_pago"],
-                "plazo": r["plazo"]
-            } for r in ultimos_5
-        ],
-        "promedio_ultimos": promedio_ultimos,
-        "promedio_historico": promedio,
-        "desviacion_estandar": desviacion,
-        "cantidad_historico": len(registros_limpios),
-        "factura_mas_lenta": factura_lenta,
-        "plazo_recomendado": plazo_recomendado,
-        "factor_dias": factor_dias,
-        "recomendacion": recomendacion,
-        "morosos": facturas_morosas,
-        "riesgo_detectado": hay_riesgo
-    }
+        # -------------------------------
+        # Retorno final
+        # -------------------------------
+        return {
+            "nombre_deudor": facturas[0].get("DEUDOR", "Desconocido"),
+            "tipo_entidad": tipo,
+            "ultimos_pagos": [
+                {
+                    "monto": r["monto"],
+                    "fecha_ces": r["fecha_ces"],
+                    "fecha_emision": r["fecha_emision"],
+                    "fecha_pago": r["fecha_pago"],
+                    "plazo": r["plazo"]
+                } for r in ultimos_5
+            ],
+            "promedio_ultimos": promedio_ultimos,
+            "promedio_historico": promedio,
+            "desviacion_estandar": desviacion,
+            "cantidad_historico": len(registros_limpios),
+            "factura_mas_lenta": factura_lenta,
+            "plazo_recomendado": plazo_recomendado,
+            "factor_dias": factor_dias,
+            "recomendacion": recomendacion,
+            "morosos": facturas_morosas,
+            "riesgo_detectado": hay_riesgo
+        }
 
 
     # ======================================================
