@@ -84,33 +84,49 @@ def obtener_tipo_entidad(rut):
 # Reglas especiales de verano
 # -----------------------------
 
-def aplicar_reglas_verano(rut, promedio_verano, promedio_anual):
+def aplicar_reglas_verano(rut, promedio_verano, promedio_anual, desv_verano, desv_anual):
     mes = datetime.now().month
     tipo = obtener_tipo_entidad(rut)
 
-    # Solo noviembre–febrero aplican reglas especiales
+    # Regla general (no es verano)
     if mes not in [11, 12, 1, 2]:
-        return {"plazo_recomendado": None, "factor_dias": 15, "tipo": tipo}
+        return {
+            "plazo_recomendado": None,
+            "factor_dias": 15,  # 15 días por punto de anticipo = 2% mora
+            "tipo": tipo
+        }
 
-    # Si no es MOP, Municipalidad o Corp, no aplicar regla de verano (mantener 15)
-    if tipo not in ["MOP", "MUNICIPALIDAD", "CORP MUNICIPAL"]:
-        return {"plazo_recomendado": None, "factor_dias": 15, "tipo": tipo}
+    # Si no es muni / corp / MOP → reglas normales
+    if tipo not in ["MUNICIPALIDAD", "CORP MUNICIPAL", "MOP"]:
+        return {
+            "plazo_recomendado": None,
+            "factor_dias": 15,
+            "tipo": tipo
+        }
 
-    # Reglas para MOP
+    # MOP
     if tipo == "MOP":
-        return {"plazo_recomendado": 60, "factor_dias": 7.5, "tipo": tipo}
+        return {
+            "plazo_recomendado": 60,
+            "factor_dias": 7.5,  # mora 4%
+            "tipo": tipo
+        }
 
-    # Si no hay pagos en verano, usar promedio anual
-    promedio = promedio_verano if not np.isnan(promedio_verano) else promedio_anual
+    # Calcular promedio + desviación
+    if not np.isnan(promedio_verano):
+        base = promedio_verano + desv_verano
+    else:
+        base = promedio_anual + desv_anual
 
-    # Reglas para Municipalidades y Corporaciones
-    if promedio <= 45:
+    # Reglas municipalidades / corporaciones
+    if base <= 45:
         return {"plazo_recomendado": 45, "factor_dias": 7.5, "tipo": tipo}
-    elif 46 <= promedio <= 70:
+    elif 46 <= base <= 70:
         return {"plazo_recomendado": 90, "factor_dias": 7.5, "tipo": tipo}
-    elif 71 <= promedio <= 90:
+    elif 71 <= base <= 90:
         return {"plazo_recomendado": 105, "factor_dias": 7.5, "tipo": tipo}
     else:
+        # >90 se evalúan puntualmente
         return {"plazo_recomendado": None, "factor_dias": 7.5, "tipo": tipo}
 
 # -----------------------------
@@ -119,6 +135,9 @@ def aplicar_reglas_verano(rut, promedio_verano, promedio_anual):
 
 def consultar_por_rut(rut_deudor):
     print(f"\n📋 Consultando información para RUT DEUDOR: {rut_deudor}")
+
+    desviacion_verano = np.std([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
+
 
     facturas = list(docs.find({"RUT DEUDOR": rut_deudor}))
     if not facturas:
@@ -170,7 +189,7 @@ def consultar_por_rut(rut_deudor):
     promedio_verano = np.mean([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
 
     # Aplicar reglas de verano
-    reglas = aplicar_reglas_verano(rut_deudor, promedio_verano, promedio_total)
+    reglas = aplicar_reglas_verano(rut_deudor, promedio_verano, promedio_total, desviacion_verano, desviacion_total)
     plazo_recomendado = reglas["plazo_recomendado"]
     factor_dias = reglas["factor_dias"]
     tipo = reglas["tipo"]
