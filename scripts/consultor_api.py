@@ -8,6 +8,16 @@ import os
 import shutil
 from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad  # ✅ Integración con consultor.py
 
+def normalizar_clave(n_doc, n_ope):
+    """
+    Normaliza claves de documentos/pagos para evitar inconsistencias
+    Ej: diferencias entre "Nº DCTO", "Nª Doc.", espacios, mayúsculas, etc.
+    """
+    if n_doc is None or n_ope is None:
+        return None
+    return (str(n_doc).strip(), str(n_ope).strip())
+
+
 UPLOAD_FOLDER = "data"
 
 # ---------------------------------------
@@ -93,14 +103,15 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
     facturas = list(docs.find({"RUT DEUDOR": rut}))
     pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
     pagos_dict = {
-        (p.get("Nª Doc."), p.get("Nº Ope.")): p
+        normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope.")): p
         for p in pagos_deudor
         if p.get("Estado") == "PAGADO"
     }
 
+
     registros_validos = []
     for f in facturas:
-        clave = (f.get("Nº DCTO"), f.get("Nº OPE"))
+        clave = normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
         pago = pagos_dict.get(clave)
         if pago:
             fec_emision = parse_fecha(f.get("FEC EMISION DIG"))
@@ -164,9 +175,17 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         morosos = list(docs.find({"RUT DEUDOR": rut, "ESTADO": "MOROSO"}))
         facturas_morosas = []
         for m in morosos:
-            clave_m = (m.get("Nº DCTO"), m.get("Nº OPE"))
-            if clave_m in [(f.get("Nº DCTO"), f.get("Nº OPE")) for f in registros_validos]:
+            clave_m = normalizar_clave(m.get("Nº DCTO"), m.get("Nº OPE"))
+
+            claves_pagadas = {
+                normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
+                for f in facturas
+                if normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE")) in pagos_dict
+            }
+
+            if clave_m in claves_pagadas:
                 continue
+
             emision = parse_fecha(m.get("FEC EMISION DIG"))
             cesion = parse_fecha(m.get("FECHA CES"))
             vcto_nom = parse_fecha(m.get("VCTO NOM"))
