@@ -142,8 +142,17 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
     registros_validos = []
 
     for f in facturas:
-        clave = normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
-        pago = pagos_dict.get(clave)
+        # normalizar claves de factura
+        clave_f = normalizar_clave(
+            f.get("Nº DCTO"),
+            f.get("Nº OPE")
+        )
+
+        if not clave_f:
+            continue
+
+        # buscar pago con misma clave normalizada
+        pago = pagos_dict.get(clave_f)
 
         if pago:
             fec_emision = parse_fecha(f.get("FEC EMISION DIG"))
@@ -153,12 +162,20 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
 
             if fec_emision and fec_pago:
                 plazo = (fec_pago - fec_emision).days
+
                 registros_validos.append({
                     "fecha_ces": fecha_ces,
                     "fecha_emision": fec_emision,
                     "fecha_pago": fec_pago,
                     "plazo": plazo,
-                    "monto": monto
+                    "monto": monto,
+                    "clave_normalizada": clave_f,
+                    "clave_original": {
+                        "factura_doc": f.get("Nº DCTO"),
+                        "factura_ope": f.get("Nº OPE"),
+                        "pago_doc": pago.get("Nª Doc."),
+                        "pago_ope": pago.get("Nº Ope.")
+                    }
                 })
 
     # ---------------------------------------------
@@ -339,9 +356,12 @@ def test_cruce(rut: str):
 
     # 2. Normalizar claves de pagos
     pagos_dict = {}
+
     for p in pagos_deudor:
         clave = normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope."))
-        pagos_dict[clave] = p
+        if clave:
+            pagos_dict[clave] = p
+
 
     # 3. Revisar cruces
     resultados = []
