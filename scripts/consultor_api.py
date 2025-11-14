@@ -101,13 +101,22 @@ tramos_uf = {
 @app.get("/consultar-rut")
 def consultar_por_rut(rut: str = Query(..., alias="rut")):
     facturas = list(docs.find({"RUT DEUDOR": rut}))
+    
     pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
+
+    # De momento NO filtramos por Estado, igual que en consultor.py
     pagos_dict = {
-        normalizar_clave(p.get("Nª Doc"), p.get("N° Ope")): p
+        normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope.")): p
         for p in pagos_deudor
-        if str(p.get("CÓDIGO ESTADO", "")).strip().upper() == "PAGADO"
     }
 
+    if pagos_deudor:
+        ejemplo = pagos_deudor[0]
+        print("🔎 Ejemplo pago de Mongo:", {
+            "Estado": ejemplo.get("Estado"),
+            "ESTADO": ejemplo.get("ESTADO"),
+            "keys": list(ejemplo.keys())
+        })
 
 
     registros_validos = []
