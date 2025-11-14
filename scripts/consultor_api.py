@@ -114,9 +114,30 @@ app.add_middleware(
 def read_root():
     return {"status": "ok"}
 
+# ============================================================
+# 🧩 Funciones útiles
+# ============================================================
+
+def parse_fecha(fecha):
+    if isinstance(fecha, str):
+        for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
+            try:
+                return datetime.strptime(fecha.strip(), fmt)
+            except:
+                continue
+    elif isinstance(fecha, datetime):
+        return fecha
+    return None
+
+
+def es_outlier(valor, promedio, desviacion):
+    if desviacion == 0:
+        return False
+    z = (valor - promedio) / desviacion
+    return abs(z) > 2.0
 
 # ============================================================
-# 🔍 DEBUG FORMATO DOC / OPE  (MOVIDO AQUÍ)
+# 🔍 DEBUG FORMATO DOC / OPE 
 # ============================================================
 
 @app.get("/debug-format")
@@ -148,31 +169,6 @@ def debug_format(rut: str):
         "docs": facturas,
         "pagos": pagos_deudor,
     }
-
-
-# ============================================================
-# 🧩 Funciones útiles
-# ============================================================
-
-def parse_fecha(fecha):
-    if isinstance(fecha, str):
-        for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
-            try:
-                return datetime.strptime(fecha.strip(), fmt)
-            except:
-                continue
-    elif isinstance(fecha, datetime):
-        return fecha
-    return None
-
-
-def es_outlier(valor, promedio, desviacion):
-    if desviacion == 0:
-        return False
-    z = (valor - promedio) / desviacion
-    return abs(z) > 2.0
-
-
 # ============================================================
 # 🔍 CONSULTAR RUT
 # ============================================================
