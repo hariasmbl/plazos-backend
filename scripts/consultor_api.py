@@ -330,6 +330,49 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         "empresas_similares": True
     }
 
+@app.get("/test-cruce")
+def test_cruce(rut: str):
+
+    # 1. Obtener docs y pagos
+    facturas = list(docs.find({"RUT DEUDOR": rut}))
+    pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
+
+    # 2. Normalizar claves de pagos
+    pagos_dict = {}
+    for p in pagos_deudor:
+        clave = normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope."))
+        pagos_dict[clave] = p
+
+    # 3. Revisar cruces
+    resultados = []
+
+    for f in facturas:
+        clave_f = normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
+        pago = pagos_dict.get(clave_f)
+
+        resultados.append({
+            "factura_raw": {
+                "Nº DCTO": f.get("Nº DCTO"),
+                "Nº OPE": f.get("Nº OPE")
+            },
+            "factura_normalizada": clave_f,
+            "pago_encontrado": True if pago else False,
+            "pago_raw": {
+                "Nª Doc.": pago.get("Nª Doc.") if pago else None,
+                "Nº Ope.": pago.get("Nº Ope.") if pago else None
+            } if pago else None,
+            "pago_normalizado": normalizar_clave(
+                pago.get("Nª Doc.") if pago else None,
+                pago.get("Nº Ope.") if pago else None
+            ) if pago else None
+        })
+
+    return {
+        "docs_encontrados": len(facturas),
+        "pagos_encontrados": len(pagos_deudor),
+        "cruces": resultados
+    }
+
 
 # ============================================================
 # 📂 Subida de archivos
