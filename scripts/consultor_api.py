@@ -373,6 +373,19 @@ def test_cruce(rut: str):
         "cruces": resultados
     }
 
+@app.get("/test-pagos-keys")
+def test_pagos_keys(rut: str = None):
+    if rut:
+        pagos_deudor = pagos.find({"Rut Deudor": rut})
+    else:
+        pagos_deudor = pagos.find().limit(20)
+
+    claves = set()
+    for p in pagos_deudor:
+        for k in p.keys():
+            claves.add(k)
+
+    return {"claves_unicas_en_pagos": sorted(list(claves))}
 
 # ============================================================
 # 📂 Subida de archivos
