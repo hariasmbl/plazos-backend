@@ -27,13 +27,6 @@ def normalizar_valor(x):
 
 
 def normalizar_clave(n_doc, n_ope):
-    """
-    Normaliza claves para evitar diferencias como:
-    - Nº / N° / Nª / No / etc
-    - ceros a la izquierda
-    - espacios
-    - puntos o guiones
-    """
     nd = normalizar_valor(n_doc)
     no = normalizar_valor(n_ope)
     if not nd or not no:
@@ -63,25 +56,6 @@ def get_ope_number(row):
         or row.get("N OPE")
         or row.get("NRO OPE")
     )
-@app.get("/debug-format")
-def debug_format(rut: str):
-
-    facturas = list(docs.find({"RUT DEUDOR": rut}, {
-        "Nº DCTO": 1,
-        "Nº OPE": 1,
-        "_id": 0
-    }))
-
-    pagos_deudor = list(pagos.find({"Rut Deudor": rut}, {
-        "Nª Doc.": 1,
-        "Nº Ope.": 1,
-        "_id": 0
-    }))
-
-    return {
-        "docs": facturas,
-        "pagos": pagos_deudor
-    }
 
 # ============================================================
 # 🔧 Conexión MongoDB
@@ -130,7 +104,29 @@ app.add_middleware(
 def read_root():
     return {"status": "ok"}
 
+# ============================================================
+# ENDPOINT debug-format 
+# ============================================================
 
+@app.get("/debug-format")
+def debug_format(rut: str):
+
+    facturas = list(docs.find({"RUT DEUDOR": rut}, {
+        "Nº DCTO": 1,
+        "Nº OPE": 1,
+        "_id": 0
+    }))
+
+    pagos_deudor = list(pagos.find({"Rut Deudor": rut}, {
+        "Nª Doc.": 1,
+        "Nº Ope.": 1,
+        "_id": 0
+    }))
+
+    return {
+        "docs": facturas,
+        "pagos": pagos_deudor
+    }
 # ============================================================
 # 🧩 Funciones útiles
 # ============================================================
@@ -389,6 +385,10 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         "empresas_similares": True
     }
 
+# ============================================================
+# 🔧 test-cruce 
+# ============================================================
+
 @app.get("/test-cruce")
 def test_cruce(rut: str):
 
@@ -434,7 +434,9 @@ def test_cruce(rut: str):
         "pagos_encontrados": len(pagos_deudor),
         "cruces": resultados
     }
-
+# ============================================================
+# 🔧 test-pagos-keys 
+# ============================================================
 @app.get("/test-pagos-keys")
 def test_pagos_keys(rut: str = None):
     if rut:
