@@ -105,7 +105,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
     pagos_dict = {
         normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope.")): p
         for p in pagos_deudor
-        if p.get("ESTADO") == "PAGADO"
+        if p.get("Estado") == "PAGADO"
     }
 
 
@@ -296,7 +296,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
     ruts_similares = [e["rut"] for e in similares if "rut" in e]
 
     facturas_similares = list(docs.find({"RUT DEUDOR": {"$in": ruts_similares}}))
-    pagos_similares = list(pagos.find({"Rut Deudor": {"$in": ruts_similares}, "ESTADO": "PAGADO"}))
+    pagos_similares = list(pagos.find({"Rut Deudor": {"$in": ruts_similares}, "Estado": "PAGADO"}))
     pagos_dict_sim = {(p.get("Nª Doc."), p.get("Nº Ope.")): p for p in pagos_similares}
 
     plazos_similares = []
