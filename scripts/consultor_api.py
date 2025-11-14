@@ -6,25 +6,48 @@ from datetime import datetime
 import numpy as np
 import os
 import shutil
-from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad  
+import re
+import unicodedata
+
+from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad
+
+
+# ============================================================
+# 🔧 Normalización de claves
+# ============================================================
+
+def normalizar_valor(x):
+    if x is None:
+        return None
+    x = str(x).strip()
+    x = unicodedata.normalize("NFKD", x).encode("ascii", "ignore").decode()
+    x = re.sub(r"[^A-Za-z0-9]", "", x)
+    x = x.lstrip("0")
+    return x.upper()
+
 
 def normalizar_clave(n_doc, n_ope):
     """
-    Normaliza claves de documentos/pagos para evitar inconsistencias
-    Ej: diferencias entre "Nº DCTO", "Nª Doc.", espacios, mayúsculas, etc.
+    Normaliza claves para evitar diferencias como:
+    - Nº / N° / Nª / No / etc
+    - ceros a la izquierda
+    - espacios
+    - puntos o guiones
     """
-    if not n_doc or not n_ope:
+    nd = normalizar_valor(n_doc)
+    no = normalizar_valor(n_ope)
+    if not nd or not no:
         return None
-    return (str(n_doc).strip(), str(n_ope).strip())
+    return (nd, no)
 
 
-UPLOAD_FOLDER = "data"
-
-# ---------------------------------------
+# ============================================================
 # 🔧 Conexión MongoDB
-# ---------------------------------------
+# ============================================================
+
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
+
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     client.server_info()
@@ -38,9 +61,13 @@ docs = db["docs"]
 pagos = db["pagos"]
 empresas_chile = db["empresas"]
 
-# ---------------------------------------
+UPLOAD_FOLDER = "data"
+
+
+# ============================================================
 # ⚙️ Configuración FastAPI
-# ---------------------------------------
+# ============================================================
+
 app = FastAPI()
 
 app.add_middleware(
@@ -48,20 +75,24 @@ app.add_middleware(
     allow_origins=[
         "https://plazos-bl.web.app",
         "https://plazos-bl.firebaseapp.com",
-        "http://localhost:5173",  # para pruebas locales con Vite o similar
-        "http://localhost:5000"],
+        "http://localhost:5173",
+        "http://localhost:5000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 def read_root():
     return {"status": "ok"}
 
-# ---------------------------------------
-# 🧩 Funciones auxiliares
-# ---------------------------------------
+
+# ============================================================
+# 🧩 Funciones útiles
+# ============================================================
+
 def parse_fecha(fecha):
     if isinstance(fecha, str):
         for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
@@ -73,61 +104,53 @@ def parse_fecha(fecha):
         return fecha
     return None
 
+
 def es_outlier(valor, promedio, desviacion):
     if desviacion == 0:
         return False
     z = (valor - promedio) / desviacion
     return abs(z) > 2.0
 
-tramos_uf = {
-    "1": "Sin Información: no se puede estimar monto de ventas.",
-    "2": "1er Rango Micro Empresa: 0,01 a 200,00 UF anuales",
-    "3": "2do Rango Micro Empresa: 200,01 a 600,00 UF anuales",
-    "4": "3er Rango Micro Empresa: 600,01 a 2.400,00 UF anuales",
-    "5": "1er Rango Pequeña Empresa: 2.400,01 a 5.000,00 UF anuales",
-    "6": "2do Rango Pequeña Empresa: 5.000,01 a 10.000,00 UF anuales",
-    "7": "3er Rango Pequeña Empresa: 10.000,01 a 25.000,00 UF anuales",
-    "8": "1er Rango Mediana Empresa: 25.000,01 a 50.000,00 UF anuales",
-    "9": "2do Rango Mediana Empresa: 50.000,01 a 100.000,00 UF anuales",
-    "10": "1er Rango Gran Empresa: 100.000,01 a 200.000,00 UF anuales",
-    "11": "2do Rango Gran Empresa: 200.000,01 a 600.000,00 UF anuales",
-    "12": "3er Rango Gran Empresa: 600.000,01 a 1.000.000,00 UF anuales",
-    "13": "4to Rango Gran Empresa: más de 1.000.000,01 UF anuales"
-}
 
-# ---------------------------------------
+# ============================================================
 # 🔍 CONSULTAR RUT
-# ---------------------------------------
+# ============================================================
+
 @app.get("/consultar-rut")
 def consultar_por_rut(rut: str = Query(..., alias="rut")):
+
+    # ---------------------------------------------
+    # 1. Cargar docs y pagos desde Mongo
+    # ---------------------------------------------
     facturas = list(docs.find({"RUT DEUDOR": rut}))
-    
     pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
 
-    # De momento NO filtramos por Estado, igual que en consultor.py
-    pagos_dict = {
-        normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope.")): p
-        for p in pagos_deudor
-    }
+    # Normalizar claves de pagos
+    pagos_dict = {}
+    for p in pagos_deudor:
+        clave = normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope."))
+        if clave:
+            pagos_dict[clave] = p
 
+    # Debug opcional
     if pagos_deudor:
-        ejemplo = pagos_deudor[0]
-        print("🔎 Ejemplo pago de Mongo:", {
-            "Estado": ejemplo.get("Estado"),
-            "ESTADO": ejemplo.get("ESTADO"),
-            "keys": list(ejemplo.keys())
-        })
+        print("Ejemplo pago:", list(pagos_deudor[0].keys()))
 
-
+    # ---------------------------------------------
+    # 2. Cruzar facturas ↔ pagos
+    # ---------------------------------------------
     registros_validos = []
+
     for f in facturas:
         clave = normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
         pago = pagos_dict.get(clave)
+
         if pago:
             fec_emision = parse_fecha(f.get("FEC EMISION DIG"))
             fec_pago = parse_fecha(pago.get("Fecha Pago"))
             fecha_ces = parse_fecha(f.get("FECHA CES"))
             monto = f.get("MONTO DOC")
+
             if fec_emision and fec_pago:
                 plazo = (fec_pago - fec_emision).days
                 registros_validos.append({
@@ -138,72 +161,76 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
                     "monto": monto
                 })
 
-    # ======================================================
-    # === CASO 1: RUT CON HISTORIAL DE PAGOS ===============
-    # ======================================================
+    # ---------------------------------------------
+    # CASO 1: RUT CON HISTORIAL REAL
+    # ---------------------------------------------
     if registros_validos:
+
         plazos = [r["plazo"] for r in registros_validos]
         promedio = np.mean(plazos)
         desviacion = np.std(plazos)
-        registros_limpios = [r for r in registros_validos if not es_outlier(r["plazo"], promedio, desviacion)]
+
+        registros_limpios = [
+            r for r in registros_validos
+            if not es_outlier(r["plazo"], promedio, desviacion)
+        ]
 
         if not registros_limpios:
             return {"error": "Todos los registros fueron considerados outliers."}
 
         registros_limpios.sort(key=lambda x: x["fecha_pago"], reverse=True)
         ultimos_5 = registros_limpios[:5]
+
         promedio_ultimos = np.mean([r["plazo"] for r in ultimos_5])
         plazo_recomendado = max(30, round(promedio_ultimos + 0.5 * desviacion))
 
-        # -------------------------------
-        # Integración con reglas de verano
-        # -------------------------------
-        from scripts.consultor import aplicar_reglas_verano
+        # -----------------------------
+        # Reglas de verano
+        # -----------------------------
+        registros_verano = [
+            r for r in registros_limpios if r["fecha_pago"].month in [11, 12, 1, 2]
+        ]
 
-        # Promedio solo en meses de verano
-        registros_verano = [r for r in registros_limpios if r["fecha_pago"].month in [11, 12, 1, 2]]
         promedio_verano = np.mean([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
-        desviacion_verano = np.std([r["plazo"] for r in registros_verano]) if registros_verano else None
+        desviacion_verano = np.std([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
 
-        # Aplicar reglas con desviación incluida
+        reglas = aplicar_reglas_verano(
+            rut, promedio_verano, promedio, desviacion_verano, desviacion
+        )
 
-        reglas = aplicar_reglas_verano(rut, promedio_verano, promedio, desviacion_verano, desviacion)
-        plazo_regla = reglas.get("plazo_recomendado")
-        factor_dias = reglas.get("factor_dias", 15)
         tipo = reglas.get("tipo") or "NORMAL"
+        factor_dias = reglas.get("factor_dias", 15)
+        plazo_regla = reglas.get("plazo_recomendado")
 
-        # 🔧 Validación adicional para casos normales
-        if tipo == "NORMAL" and factor_dias == 7.5:
-            factor_dias = 15
-
-        if plazo_regla and not np.isnan(plazo_regla):
+        if plazo_regla is not None and not np.isnan(plazo_regla):
             plazo_recomendado = plazo_regla
 
-        # -------------------------------
-        # Facturas morosas
-        # -------------------------------
+        # -----------------------------
+        # Morosos
+        # -----------------------------
+        morosos_data = []
         morosos = list(docs.find({"RUT DEUDOR": rut, "ESTADO": "MOROSO"}))
-        facturas_morosas = []
+
+        claves_pagadas = set(
+            normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
+            for f in facturas if normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE")) in pagos_dict
+        )
+
         for m in morosos:
             clave_m = normalizar_clave(m.get("Nº DCTO"), m.get("Nº OPE"))
-
-            claves_pagadas = {
-                normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
-                for f in facturas
-                if normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE")) in pagos_dict
-            }
-
             if clave_m in claves_pagadas:
                 continue
 
             emision = parse_fecha(m.get("FEC EMISION DIG"))
             cesion = parse_fecha(m.get("FECHA CES"))
-            vcto_nom = parse_fecha(m.get("VCTO NOM"))
+            vcto = parse_fecha(m.get("VCTO NOM"))
             monto = m.get("MONTO DOC")
             saldo = m.get("SALDO")
+
             dias_vencido = (datetime.today() - emision).days if emision else None
-            dias_mora = (datetime.today() - vcto_nom).days if vcto_nom else None
-            facturas_morosas.append({
+            dias_mora = (datetime.today() - vcto).days if vcto else None
+
+            morosos_data.append({
                 "monto": monto,
                 "saldo": saldo,
                 "fecha_ces": cesion,
@@ -213,8 +240,8 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             })
 
         hay_riesgo = any(
-            m.get("dias_vencido") and m["dias_vencido"] > plazo_recomendado
-            for m in facturas_morosas
+            m["dias_vencido"] and m["dias_vencido"] > plazo_recomendado
+            for m in morosos_data
         )
 
         recomendacion = (
@@ -225,163 +252,109 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
 
         factura_lenta = max(registros_limpios, key=lambda x: x["plazo"])
 
-        # -------------------------------
-        # 🔧 Evitar errores por NaN o valores no serializables
-        # -------------------------------
-        def safe_num(x):
-            try:
-                if x is None or (isinstance(x, float) and np.isnan(x)):
-                    return 0
-                return float(x)
-            except Exception:
-                return 0
-
-        promedio_ultimos = safe_num(promedio_ultimos)
-        promedio = safe_num(promedio)
-        desviacion = safe_num(desviacion)
-        plazo_recomendado = safe_num(plazo_recomendado)
-
-        # -------------------------------
-        # Retorno final
-        # -------------------------------
         return {
             "nombre_deudor": facturas[0].get("DEUDOR", "Desconocido"),
             "tipo_entidad": tipo,
-            "ultimos_pagos": [
-                {
-                    "monto": r["monto"],
-                    "fecha_ces": r["fecha_ces"],
-                    "fecha_emision": r["fecha_emision"],
-                    "fecha_pago": r["fecha_pago"],
-                    "plazo": r["plazo"]
-                } for r in ultimos_5
-            ],
-            "promedio_ultimos": promedio_ultimos,
-            "promedio_historico": promedio,           # nombre correcto para el frontend
-            "desviacion_estandar": desviacion,        # nombre correcto para el frontend
+            "ultimos_pagos": ultimos_5,
+            "promedio_ultimos": float(promedio_ultimos),
+            "promedio_historico": float(promedio),
+            "desviacion_estandar": float(desviacion),
             "cantidad_historico": len(registros_limpios),
-            "factura_mas_lenta": {
-                "monto": factura_lenta["monto"],
-                "fecha_ces": factura_lenta["fecha_ces"],
-                "fecha_emision": factura_lenta["fecha_emision"],
-                "fecha_pago": factura_lenta["fecha_pago"],
-                "plazo": factura_lenta["plazo"]
-            },
-
-            "plazo_recomendado": plazo_recomendado,
+            "factura_mas_lenta": factura_lenta,
+            "plazo_recomendado": float(plazo_recomendado),
             "factor_dias": factor_dias,
             "recomendacion": recomendacion,
-            "morosos": facturas_morosas,
+            "morosos": morosos_data,
             "riesgo_detectado": hay_riesgo
         }
 
-
-    # ======================================================
-    # === CASO 2: RUT SIN HISTORIAL ========================
-    # ======================================================
+    # ---------------------------------------------
+    # CASO 2: SIN HISTORIAL → Empresas similares
+    # ---------------------------------------------
     empresa = empresas_chile.find_one({"rut": rut})
+
     if not empresa:
         return {
             "error": "RUT no tiene historial ni está registrado en la base de empresas.",
             "plazo_recomendado": 30,
-            "recomendacion": "No existe información histórica. Se recomienda usar un plazo base de 30 días."
+            "recomendacion": "No existe información histórica. Plazo base 30 días."
         }
 
     rubro = empresa.get("rubro")
     tramo = empresa.get("tramo_ventas")
 
-    if not rubro or not tramo:
-        return {
-            "nombre_deudor": empresa.get("nombre", "Desconocido"),
-            "error": "Faltan datos de rubro o tramo de ventas.",
-            "recomendacion": "No es posible estimar plazo por similitud. Utilice el plazo base de 30 días.",
-            "plazo_recomendado": 30,
-            "ultimos_pagos": [],
-            "morosos": [],
-            "empresas_similares": False
-        }
-
-    # --- Buscar empresas similares ---
     similares = list(empresas_chile.find({"rubro": rubro, "tramo_ventas": tramo}))
-    ruts_similares = [e["rut"] for e in similares if "rut" in e]
+    ruts_similares = [e["rut"] for e in similares]
 
-    facturas_similares = list(docs.find({"RUT DEUDOR": {"$in": ruts_similares}}))
-    pagos_similares = list(pagos.find({"Rut Deudor": {"$in": ruts_similares}, "Estado": "PAGADO"}))
-    pagos_dict_sim = {(p.get("Nª Doc."), p.get("Nº Ope.")): p for p in pagos_similares}
+    facturas_sim = list(docs.find({"RUT DEUDOR": {"$in": ruts_similares}}))
+    pagos_sim = list(pagos.find({"Rut Deudor": {"$in": ruts_similares}}))
 
-    plazos_similares = []
-    for f in facturas_similares:
-        clave = (f.get("Nº DCTO"), f.get("Nº OPE"))
-        pago = pagos_dict_sim.get(clave)
+    pagos_sim_dict = {
+        normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope.")): p
+        for p in pagos_sim
+    }
+
+    plazos_sim = []
+    for f in facturas_sim:
+        clave = normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
+        pago = pagos_sim_dict.get(clave)
         if pago:
-            fec_emision = parse_fecha(f.get("FEC EMISION DIG"))
-            fec_pago = parse_fecha(pago.get("Fecha Pago"))
-            if fec_emision and fec_pago:
-                plazo = (fec_pago - fec_emision).days
-                plazos_similares.append(plazo)
+            fe = parse_fecha(f.get("FEC EMISION DIG"))
+            fp = parse_fecha(pago.get("Fecha Pago"))
+            if fe and fp:
+                plazos_sim.append((fp - fe).days)
 
-    if not plazos_similares:
+    if not plazos_sim:
         return {
             "nombre_deudor": empresa.get("nombre", "Desconocido"),
             "error": "No se encontraron pagos de empresas similares.",
-            "recomendacion": "No es posible estimar plazo. Se recomienda usar 30 días como base.",
             "plazo_recomendado": 30,
-            "ultimos_pagos": [],
-            "morosos": [],
-            "empresas_similares": False
+            "recomendacion": "Sin suficiente información. Plazo base 30 días."
         }
 
-    # --- Cálculo para empresas similares ---
-    promedio_bruto = np.mean(plazos_similares)
-    desviacion_bruto = np.std(plazos_similares)
-    plazos_limpios = [p for p in plazos_similares if not es_outlier(p, promedio_bruto, desviacion_bruto)]
-
-    if not plazos_limpios:
-        return {
-            "nombre_deudor": empresa.get("nombre", "Desconocido"),
-            "error": "Datos insuficientes para estimar plazo confiable.",
-            "recomendacion": "Se recomienda usar 30 días como base.",
-            "plazo_recomendado": 30,
-            "empresas_similares": False
-        }
-
-    promedio = np.mean(plazos_limpios)
-    desviacion = np.std(plazos_limpios)
+    promedio = np.mean(plazos_sim)
+    desviacion = np.std(plazos_sim)
     plazo_recomendado = max(30, round(promedio + 0.5 * desviacion))
 
     return {
         "nombre_deudor": empresa.get("nombre", "Desconocido"),
         "recomendacion": f"Se recomienda cubrir {plazo_recomendado} días entre plazo y anticipo",
         "rubro": rubro,
-        "tramo": tramos_uf.get(tramo, f"Tramo desconocido ({tramo})"),
-        "promedio_empresas_similares": promedio,
-        "desviacion_empresas_similares": desviacion,
-        "cantidad_empresas_similares": len(plazos_limpios),
+        "tramo": tramo,
+        "promedio_empresas_similares": float(promedio),
+        "desviacion_empresas_similares": float(desviacion),
+        "cantidad_empresas_similares": len(plazos_sim),
         "plazo_recomendado": plazo_recomendado,
         "ultimos_pagos": [],
         "morosos": [],
         "empresas_similares": True
     }
 
-# ---------------------------------------
+
+# ============================================================
 # 📂 Subida de archivos
-# ---------------------------------------
+# ============================================================
+
 @app.post("/subir-docs")
 async def subir_docs(file: UploadFile = File(...)):
     return await guardar_archivo(file, "list docs")
+
 
 @app.post("/subir-pagos")
 async def subir_pagos(file: UploadFile = File(...)):
     return await guardar_archivo(file, "cartola")
 
+
 @app.post("/subir-empresas")
 async def subir_empresas(file: UploadFile = File(...)):
     return await guardar_archivo(file, "empresas")
+
 
 async def guardar_archivo(file: UploadFile, tipo: str):
     try:
         filename = file.filename
         ruta = os.path.join(UPLOAD_FOLDER, filename)
+
         with open(ruta, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
@@ -390,20 +363,21 @@ async def guardar_archivo(file: UploadFile, tipo: str):
             df = cargar_excel(ruta)
             if not df.empty:
                 resumen = insertar_documentos(df, filename)
-                return {"mensaje": f"✅ Archivo {filename} subido y procesado.", "resumen": resumen}
+                return {"mensaje": f"Archivo {filename} procesado", "resumen": resumen}
 
         elif tipo == "cartola":
             from scripts.cargar_pagos import cargar_y_limpiar_excel, insertar_documentos
             df = cargar_y_limpiar_excel(ruta)
             if not df.empty:
                 resumen = insertar_documentos(df, filename)
-                return {"mensaje": f"✅ Archivo {filename} subido y procesado.", "resumen": resumen}
+                return {"mensaje": f"Archivo {filename} procesado", "resumen": resumen}
 
         elif tipo == "empresas":
             from scripts.cargar_empresas import procesar_txt
             procesar_txt(ruta)
-            return {"mensaje": f"✅ Archivo {filename} subido y empresas actualizadas."}
+            return {"mensaje": f"Empresas actualizadas desde {filename}"}
 
-        return {"mensaje": f"⚠️ El archivo {filename} no contenía datos válidos."}
+        return {"mensaje": "Archivo sin datos válidos"}
+
     except Exception as e:
-        return {"mensaje": f"❌ Error al subir archivo: {str(e)}"}
+        return {"mensaje": f"Error al subir archivo: {str(e)}"}
