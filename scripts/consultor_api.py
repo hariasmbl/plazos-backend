@@ -40,6 +40,29 @@ def normalizar_clave(n_doc, n_ope):
         return None
     return (nd, no)
 
+def get_doc_number(row):
+    return (
+        row.get("Nº DCTO")
+        or row.get("N° DCTO")
+        or row.get("NRO DCTO")
+        or row.get("Nª Doc.")
+        or row.get("Na Doc.")
+        or row.get("N° Doc.")
+        or row.get("Nº Doc.")
+        or row.get("Nro Doc.")
+        or row.get("N° Documento")
+    )
+
+def get_ope_number(row):
+    return (
+        row.get("Nº OPE")
+        or row.get("N° OPE")
+        or row.get("Nro Ope.")
+        or row.get("Nº Ope.")
+        or row.get("N° Ope.")
+        or row.get("N OPE")
+        or row.get("NRO OPE")
+    )
 
 # ============================================================
 # 🔧 Conexión MongoDB
