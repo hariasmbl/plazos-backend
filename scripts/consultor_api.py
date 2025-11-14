@@ -13,7 +13,7 @@ def normalizar_clave(n_doc, n_ope):
     Normaliza claves de documentos/pagos para evitar inconsistencias
     Ej: diferencias entre "Nº DCTO", "Nª Doc.", espacios, mayúsculas, etc.
     """
-    if n_doc is None or n_ope is None:
+    if not n_doc or not n_ope:
         return None
     return (str(n_doc).strip(), str(n_ope).strip())
 
@@ -103,10 +103,11 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
     facturas = list(docs.find({"RUT DEUDOR": rut}))
     pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
     pagos_dict = {
-        normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope.")): p
+        normalizar_clave(p.get("Nª Doc"), p.get("N° Ope")): p
         for p in pagos_deudor
-        if p.get("Estado") == "PAGADO"
+        if str(p.get("CÓDIGO ESTADO", "")).strip().upper() == "PAGADO"
     }
+
 
 
     registros_validos = []
