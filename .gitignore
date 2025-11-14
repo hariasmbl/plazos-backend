@@ -70,3 +70,39 @@ node_modules/
 
 Otros_docs/PUB_EMPRESAS.txt
 
+# --------------------------------------------
+# IGNORAR DATOS PESADOS Y ARCHIVOS DE PROCESO
+# --------------------------------------------
+
+# Procesados del consultor (NUNCA deben ir a Git)
+data/procesados/
+data/procesados/**
+
+# Excels y archivos temporales
+data/**/*.xls
+data/**/*.xlsx
+data/**/*.xlsm
+data/**/*.csv
+
+# Ignorar archivo de clasificaciones si no es parte del backend
+data/clasificaciones/
+data/clasificaciones/**
+
+# Archivos temporales de Excel
+~$*
+
+# RAR, ZIP u otros archivos comprimidos
+*.rar
+*.zip
+
+# Archivos generados que no forman parte del proyecto
+frontend/404.html
+
+# Scripts que no se usan en producción
+scripts/clasificacion_bl.py
+
+# Caches de Python
+__pycache__/
+*.pyc
+
+

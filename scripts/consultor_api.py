@@ -6,7 +6,7 @@ from datetime import datetime
 import numpy as np
 import os
 import shutil
-from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad  # ✅ Integración con consultor.py
+from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad  
 
 def normalizar_clave(n_doc, n_ope):
     """
@@ -247,10 +247,17 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
                 } for r in ultimos_5
             ],
             "promedio_ultimos": promedio_ultimos,
-            "promedio_historico": promedio,
-            "desviacion_estandar": desviacion,
+            "promedio_historico": promedio,           # nombre correcto para el frontend
+            "desviacion_estandar": desviacion,        # nombre correcto para el frontend
             "cantidad_historico": len(registros_limpios),
-            "factura_mas_lenta": factura_lenta,
+            "factura_mas_lenta": {
+                "monto": factura_lenta["monto"],
+                "fecha_ces": factura_lenta["fecha_ces"],
+                "fecha_emision": factura_lenta["fecha_emision"],
+                "fecha_pago": factura_lenta["fecha_pago"],
+                "plazo": factura_lenta["plazo"]
+            },
+
             "plazo_recomendado": plazo_recomendado,
             "factor_dias": factor_dias,
             "recomendacion": recomendacion,
