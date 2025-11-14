@@ -27,11 +27,19 @@ def normalizar_valor(x):
 
 
 def normalizar_clave(n_doc, n_ope):
+    """
+    Normaliza claves para evitar diferencias como:
+    - Nº / N° / Nª / No / etc
+    - ceros a la izquierda
+    - espacios
+    - puntos o guiones
+    """
     nd = normalizar_valor(n_doc)
     no = normalizar_valor(n_ope)
     if not nd or not no:
         return None
     return (nd, no)
+
 
 def get_doc_number(row):
     return (
@@ -46,6 +54,7 @@ def get_doc_number(row):
         or row.get("N° Documento")
     )
 
+
 def get_ope_number(row):
     return (
         row.get("Nº OPE")
@@ -56,6 +65,7 @@ def get_ope_number(row):
         or row.get("N OPE")
         or row.get("NRO OPE")
     )
+
 
 # ============================================================
 # 🔧 Conexión MongoDB
@@ -104,29 +114,42 @@ app.add_middleware(
 def read_root():
     return {"status": "ok"}
 
+
 # ============================================================
-# ENDPOINT debug-format 
+# 🔍 DEBUG FORMATO DOC / OPE  (MOVIDO AQUÍ)
 # ============================================================
 
 @app.get("/debug-format")
 def debug_format(rut: str):
 
-    facturas = list(docs.find({"RUT DEUDOR": rut}, {
-        "Nº DCTO": 1,
-        "Nº OPE": 1,
-        "_id": 0
-    }))
+    facturas = list(
+        docs.find(
+            {"RUT DEUDOR": rut},
+            {
+                "Nº DCTO": 1,
+                "Nº OPE": 1,
+                "_id": 0,
+            },
+        )
+    )
 
-    pagos_deudor = list(pagos.find({"Rut Deudor": rut}, {
-        "Nª Doc.": 1,
-        "Nº Ope.": 1,
-        "_id": 0
-    }))
+    pagos_deudor = list(
+        pagos.find(
+            {"Rut Deudor": rut},
+            {
+                "Nª Doc.": 1,
+                "Nº Ope.": 1,
+                "_id": 0,
+            },
+        )
+    )
 
     return {
         "docs": facturas,
-        "pagos": pagos_deudor
+        "pagos": pagos_deudor,
     }
+
+
 # ============================================================
 # 🧩 Funciones útiles
 # ============================================================
@@ -183,7 +206,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         # normalizar claves de factura
         clave_f = normalizar_clave(
             f.get("Nº DCTO"),
-            f.get("Nº OPE")
+            f.get("Nº OPE"),
         )
 
         if not clave_f:
@@ -201,20 +224,22 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             if fec_emision and fec_pago:
                 plazo = (fec_pago - fec_emision).days
 
-                registros_validos.append({
-                    "fecha_ces": fecha_ces,
-                    "fecha_emision": fec_emision,
-                    "fecha_pago": fec_pago,
-                    "plazo": plazo,
-                    "monto": monto,
-                    "clave_normalizada": clave_f,
-                    "clave_original": {
-                        "factura_doc": f.get("Nº DCTO"),
-                        "factura_ope": f.get("Nº OPE"),
-                        "pago_doc": pago.get("Nª Doc."),
-                        "pago_ope": pago.get("Nº Ope.")
+                registros_validos.append(
+                    {
+                        "fecha_ces": fecha_ces,
+                        "fecha_emision": fec_emision,
+                        "fecha_pago": fec_pago,
+                        "plazo": plazo,
+                        "monto": monto,
+                        "clave_normalizada": clave_f,
+                        "clave_original": {
+                            "factura_doc": f.get("Nº DCTO"),
+                            "factura_ope": f.get("Nº OPE"),
+                            "pago_doc": pago.get("Nª Doc."),
+                            "pago_ope": pago.get("Nº Ope."),
+                        },
                     }
-                })
+                )
 
     # ---------------------------------------------
     # CASO 1: RUT CON HISTORIAL REAL
@@ -226,8 +251,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         desviacion = np.std(plazos)
 
         registros_limpios = [
-            r for r in registros_validos
-            if not es_outlier(r["plazo"], promedio, desviacion)
+            r for r in registros_validos if not es_outlier(r["plazo"], promedio, desviacion)
         ]
 
         if not registros_limpios:
@@ -246,8 +270,12 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             r for r in registros_limpios if r["fecha_pago"].month in [11, 12, 1, 2]
         ]
 
-        promedio_verano = np.mean([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
-        desviacion_verano = np.std([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
+        promedio_verano = (
+            np.mean([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
+        )
+        desviacion_verano = (
+            np.std([r["plazo"] for r in registros_verano]) if registros_verano else np.nan
+        )
 
         reglas = aplicar_reglas_verano(
             rut, promedio_verano, promedio, desviacion_verano, desviacion
@@ -268,7 +296,8 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
 
         claves_pagadas = set(
             normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
-            for f in facturas if normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE")) in pagos_dict
+            for f in facturas
+            if normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE")) in pagos_dict
         )
 
         for m in morosos:
@@ -285,14 +314,16 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             dias_vencido = (datetime.today() - emision).days if emision else None
             dias_mora = (datetime.today() - vcto).days if vcto else None
 
-            morosos_data.append({
-                "monto": monto,
-                "saldo": saldo,
-                "fecha_ces": cesion,
-                "fecha_emision": emision,
-                "dias_vencido": dias_vencido,
-                "dias_mora": dias_mora
-            })
+            morosos_data.append(
+                {
+                    "monto": monto,
+                    "saldo": saldo,
+                    "fecha_ces": cesion,
+                    "fecha_emision": emision,
+                    "dias_vencido": dias_vencido,
+                    "dias_mora": dias_mora,
+                }
+            )
 
         hay_riesgo = any(
             m["dias_vencido"] and m["dias_vencido"] > plazo_recomendado
@@ -301,8 +332,8 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
 
         recomendacion = (
             "Hay documentos morosos que superan el plazo recomendado, revisar plazo y anticipo con riesgo"
-            if hay_riesgo else
-            f"Se recomienda cubrir {plazo_recomendado} días entre plazo y anticipo"
+            if hay_riesgo
+            else f"Se recomienda cubrir {plazo_recomendado} días entre plazo y anticipo"
         )
 
         factura_lenta = max(registros_limpios, key=lambda x: x["plazo"])
@@ -320,7 +351,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             "factor_dias": factor_dias,
             "recomendacion": recomendacion,
             "morosos": morosos_data,
-            "riesgo_detectado": hay_riesgo
+            "riesgo_detectado": hay_riesgo,
         }
 
     # ---------------------------------------------
@@ -332,7 +363,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         return {
             "error": "RUT no tiene historial ni está registrado en la base de empresas.",
             "plazo_recomendado": 30,
-            "recomendacion": "No existe información histórica. Plazo base 30 días."
+            "recomendacion": "No existe información histórica. Plazo base 30 días.",
         }
 
     rubro = empresa.get("rubro")
@@ -345,8 +376,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
     pagos_sim = list(pagos.find({"Rut Deudor": {"$in": ruts_similares}}))
 
     pagos_sim_dict = {
-        normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope.")): p
-        for p in pagos_sim
+        normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope.")): p for p in pagos_sim
     }
 
     plazos_sim = []
@@ -364,7 +394,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             "nombre_deudor": empresa.get("nombre", "Desconocido"),
             "error": "No se encontraron pagos de empresas similares.",
             "plazo_recomendado": 30,
-            "recomendacion": "Sin suficiente información. Plazo base 30 días."
+            "recomendacion": "Sin suficiente información. Plazo base 30 días.",
         }
 
     promedio = np.mean(plazos_sim)
@@ -382,61 +412,66 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         "plazo_recomendado": plazo_recomendado,
         "ultimos_pagos": [],
         "morosos": [],
-        "empresas_similares": True
+        "empresas_similares": True,
     }
 
+
 # ============================================================
-# 🔧 test-cruce 
+# 🔧 test-cruce
 # ============================================================
 
 @app.get("/test-cruce")
 def test_cruce(rut: str):
 
-    # 1. Obtener docs y pagos
     facturas = list(docs.find({"RUT DEUDOR": rut}))
     pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
 
-    # 2. Normalizar claves de pagos
     pagos_dict = {}
-
     for p in pagos_deudor:
         clave = normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope."))
         if clave:
             pagos_dict[clave] = p
 
-
-    # 3. Revisar cruces
     resultados = []
 
     for f in facturas:
         clave_f = normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
         pago = pagos_dict.get(clave_f)
 
-        resultados.append({
-            "factura_raw": {
-                "Nº DCTO": f.get("Nº DCTO"),
-                "Nº OPE": f.get("Nº OPE")
-            },
-            "factura_normalizada": clave_f,
-            "pago_encontrado": True if pago else False,
-            "pago_raw": {
-                "Nª Doc.": pago.get("Nª Doc.") if pago else None,
-                "Nº Ope.": pago.get("Nº Ope.") if pago else None
-            } if pago else None,
-            "pago_normalizado": normalizar_clave(
-                pago.get("Nª Doc.") if pago else None,
-                pago.get("Nº Ope.") if pago else None
-            ) if pago else None
-        })
+        resultados.append(
+            {
+                "factura_raw": {
+                    "Nº DCTO": f.get("Nº DCTO"),
+                    "Nº OPE": f.get("Nº OPE"),
+                },
+                "factura_normalizada": clave_f,
+                "pago_encontrado": True if pago else False,
+                "pago_raw": {
+                    "Nª Doc.": pago.get("Nª Doc.") if pago else None,
+                    "Nº Ope.": pago.get("Nº Ope.") if pago else None,
+                }
+                if pago
+                else None,
+                "pago_normalizado": normalizar_clave(
+                    pago.get("Nª Doc.") if pago else None,
+                    pago.get("Nº Ope.") if pago else None,
+                )
+                if pago
+                else None,
+            }
+        )
 
     return {
         "docs_encontrados": len(facturas),
         "pagos_encontrados": len(pagos_deudor),
-        "cruces": resultados
+        "cruces": resultados,
     }
+
+
 # ============================================================
-# 🔧 test-pagos-keys 
+# 🔧 test-pagos-keys
 # ============================================================
+
 @app.get("/test-pagos-keys")
 def test_pagos_keys(rut: str = None):
     if rut:
@@ -450,6 +485,7 @@ def test_pagos_keys(rut: str = None):
             claves.add(k)
 
     return {"claves_unicas_en_pagos": sorted(list(claves))}
+
 
 # ============================================================
 # 📂 Subida de archivos
