@@ -63,6 +63,25 @@ def get_ope_number(row):
         or row.get("N OPE")
         or row.get("NRO OPE")
     )
+@app.get("/debug-format")
+def debug_format(rut: str):
+
+    facturas = list(docs.find({"RUT DEUDOR": rut}, {
+        "Nº DCTO": 1,
+        "Nº OPE": 1,
+        "_id": 0
+    }))
+
+    pagos_deudor = list(pagos.find({"Rut Deudor": rut}, {
+        "Nª Doc.": 1,
+        "Nº Ope.": 1,
+        "_id": 0
+    }))
+
+    return {
+        "docs": facturas,
+        "pagos": pagos_deudor
+    }
 
 # ============================================================
 # 🔧 Conexión MongoDB
