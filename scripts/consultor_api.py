@@ -26,19 +26,46 @@ def normalizar_valor(x):
     return x.upper()
 
 
+# ============================================================
+# ✅ ÚNICO CAMBIO AUTORIZADO: nueva versión de normalizar_clave
+# ============================================================
+
 def normalizar_clave(n_doc, n_ope):
     """
-    Normaliza claves para evitar diferencias como:
-    - Nº / N° / Nª / No / etc
-    - ceros a la izquierda
-    - espacios
-    - puntos o guiones
+    Conversión robusta:
+    - Acepta int, str, '00123', '123.0'
+    - Elimina ceros iniciales
+    - Retorna siempre ('123','456') como strings
     """
-    nd = normalizar_valor(n_doc)
-    no = normalizar_valor(n_ope)
-    if not nd or not no:
+
+    def to_int_like(x):
+        if x is None:
+            return None
+        s = str(x).strip()
+
+        if s == "":
+            return None
+
+        # quitar espacios y posibles separadores o basura
+        s = s.replace(" ", "")
+
+        # si es entero puro
+        if s.isdigit():
+            return int(s)
+
+        # si es un float del tipo "123.0"
+        try:
+            return int(float(s))
+        except:
+            return None
+
+    d = to_int_like(n_doc)
+    o = to_int_like(n_ope)
+
+    if d is None or o is None:
         return None
-    return (nd, no)
+
+    return (str(d), str(o))
 
 
 def get_doc_number(row):
@@ -65,6 +92,7 @@ def get_ope_number(row):
         or row.get("N OPE")
         or row.get("NRO OPE")
     )
+
 
 # ============================================================
 # 🔧 Conexión MongoDB
@@ -138,13 +166,12 @@ def es_outlier(valor, promedio, desviacion):
 
 
 # ============================================================
-# 🔍 DEBUG FORMATO DOC / OPE  (ÚNICO CAMBIO)
+# 🔍 DEBUG FORMATO DOC / OPE 
 # ============================================================
 
 @app.get("/debug-format")
 def debug_format(rut: str):
 
-    # Se elimina la proyección con campos que terminan en punto
     facturas = list(docs.find({"RUT DEUDOR": rut}))
     pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
 
