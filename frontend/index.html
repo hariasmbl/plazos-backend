@@ -194,7 +194,7 @@
       if (data.factura_mas_lenta) {
         html += `
           <section>
-            <h2 class="text-lg font-semibold text-blue-800 mt-8 mb-2">Factura más lenta</h2>
+            <h2 class="text-lg font-semibold text-blue-800 mt-8 mb-2">Factura mayor plazo de pago</h2>
             <p>Monto: ${(data.factura_mas_lenta.monto || 0).toLocaleString()}</p>
             <p>Compra: ${f(data.factura_mas_lenta.fecha_ces)}</p>
             <p>Emisión: ${f(data.factura_mas_lenta.fecha_emision)}</p>
@@ -205,7 +205,7 @@
       } else {
         html += `
           <section>
-            <h2 class="text-lg font-semibold text-blue-800 mt-8 mb-2">Factura más lenta</h2>
+            <h2 class="text-lg font-semibold text-blue-800 mt-8 mb-2">Factura mayor plazo de pago</h2>
             <p>No existen facturas registradas para este deudor.</p>
           </section>
         `;
@@ -245,6 +245,39 @@
             </table>
           </section>`;
       }
+
+      // ==========================================================
+      // Empresas Similares (cuando no hay historial del deudor)
+      // ==========================================================
+      if (data.empresas_similares) {
+
+        html += `
+          <section class="bg-blue-50 border border-blue-300 p-4 rounded mt-6">
+            <h2 class="text-lg font-semibold text-blue-900 mb-2">
+              Datos de Empresas Similares
+            </h2>
+
+            <p><strong>Rubro:</strong> ${data.rubro || "N/A"}</p>
+            <p><strong>Tramo según ventas:</strong> ${data.tramo || "N/A"}</p>
+
+            <p class="mt-2">
+              Promedio de pago empresas similares:
+              <strong>${data.promedio_empresas_similares ? Math.round(data.promedio_empresas_similares) : "N/A"} días</strong>
+            </p>
+
+            <p>
+              Desviación estándar:
+              <strong>${data.desviacion_empresas_similares ? Math.round(data.desviacion_empresas_similares) : "N/A"}</strong>
+            </p>
+
+            <p>
+              Cantidad de pagos considerados:
+              <strong>${data.cantidad_empresas_similares || 0}</strong>
+            </p>
+          </section>
+        `;
+      }
+
 
       div.innerHTML = html;
     }
