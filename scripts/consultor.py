@@ -114,9 +114,9 @@ def aplicar_reglas_verano(rut, promedio_verano, promedio_anual, desv_verano, des
 
     # Calcular promedio + desviación
     if not np.isnan(promedio_verano):
-        base = promedio_verano + desv_verano
+        base = promedio_verano + 0.5 * desv_verano
     else:
-        base = promedio_anual + desv_anual
+        base = promedio_anual + 0.5 * desv_anual
 
     # Reglas municipalidades / corporaciones
     if base <= 45:
