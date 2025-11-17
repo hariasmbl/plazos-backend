@@ -41,50 +41,43 @@ def es_outlier(valor, promedio, desviacion):
 def obtener_tipo_entidad(rut):
     rut = str(rut).replace(".", "").strip().upper()
 
-    # ======================================================
-    # 1) DETECTAR MOP SÓLO POR RUT
-    # ======================================================
-    if rut in ["61202000-0", "612020000", "61.202.000-0"]:
-        return "MOP"
+    try:
+        # 🔹 1. Detectar MOP directamente
+        if rut in ["61202000-0", "61.202.000-0", "612020000"]:
+            print("✅ Detectado MOP por RUT")
+            return "MOP"
 
-    # ======================================================
-    # 2) Buscar en DOCS (historial de documentos)
-    # ======================================================
-    doc = docs.find_one({"RUT DEUDOR": rut})
-    nombre_doc = str(doc.get("DEUDOR", "")).upper() if doc else ""
+        # 🔹 2. Detectar municipalidades / corporaciones por nombre en Mongo
+        doc = docs.find_one({"RUT DEUDOR": rut})
+        if doc:
+            nombre = str(doc.get("DEUDOR", "")).upper()
+            if "MUNICIPALIDAD" in nombre:
+                print(f"✅ Detectada MUNICIPALIDAD por nombre: {nombre[:50]}")
+                return "MUNICIPALIDAD"
+            if "CORP" in nombre and "MUNICIPAL" in nombre:
+                print(f"✅ Detectada CORP MUNICIPAL por nombre: {nombre[:50]}")
+                return "CORP MUNICIPAL"
 
-    # ======================================================
-    # 3) Buscar en base de empresas (sin historial)
-    # ======================================================
-    empresa = empresas_chile.find_one({"rut": rut})
-    nombre_emp = str(empresa.get("nombre", "")).upper() if empresa else ""
+        # 🔹 3. Intentar leer Excel solo si existe
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        ruta_excel = os.path.join(base_dir, "..", "data", "clasificaciones", "clasificacion_bl.xlsx")
 
-    # Prioridad: DOCS → EMPRESAS
-    nombre = nombre_doc or nombre_emp
+        if os.path.exists(ruta_excel):
+            df = pd.read_excel(ruta_excel)
+            df["RUT"] = df["RUT"].astype(str).str.replace(".", "", regex=False).str.strip().str.upper()
+            fila = df.loc[df["RUT"] == rut]
+            if not fila.empty:
+                clasif = str(fila.iloc[0].get("CLASIFICACIÓN BL 2", "")).upper()
+                if "MUNICIPALIDAD" in clasif:
+                    return "MUNICIPALIDAD"
+                elif "CORP" in clasif:
+                    return "CORP MUNICIPAL"
+        else:
+            print(f"⚠️ Archivo clasificacion_bl.xlsx no encontrado en {ruta_excel}")
 
-    # ======================================================
-    # 4) MUNICIPALIDADES (todas las variantes típicas)
-    # ======================================================
-    if any(term in nombre for term in [
-        "MUNICIPALIDAD",
-        "ILUSTRE MUNICIPALIDAD",
-        "I. MUNICIPALIDAD"
-    ]):
-        return "MUNICIPALIDAD"
+    except Exception as e:
+        print(f"⚠️ Error al detectar tipo de entidad ({rut}): {e}")
 
-    # ======================================================
-    # 5) CORPORACIONES MUNICIPALES (todas las variantes)
-    # ======================================================
-    if ("CORP" in nombre or "CORPORACION" in nombre) and (
-        "MUNICIPAL" in nombre or 
-        " MUN " in nombre or 
-        nombre.startswith("CORP MUN")
-    ):
-        return "CORP MUNICIPAL"
-
-    # ======================================================
-    # 6) Si no coincide con nada → tipo normal
-    # ======================================================
     return None
 
 # -----------------------------
