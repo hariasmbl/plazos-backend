@@ -348,6 +348,25 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             "morosos": morosos_data,
             "riesgo_detectado": hay_riesgo
         }
+    
+    # -------------------------------------------
+    # municipalidades/corp SIN historial
+    # -------------------------------------------
+    tipo_entidad = obtener_tipo_entidad(rut)
+
+    if tipo_entidad in ["MUNICIPALIDAD", "CORP MUNICIPAL"]:
+        # Entidad pública sin historial -> aplicar regla fija municipal verano
+        return {
+            "nombre_deudor": "Entidad Municipal sin historial",
+            "tipo_entidad": tipo_entidad,
+            "plazo_recomendado": 105,
+            "factor_dias": 7.5,
+            "ultimos_pagos": [],
+            "morosos": [],
+            "empresas_similares": False,
+            "recomendacion": "Se recomienda cubrir 105 días entre plazo y anticipo (promedio verano municipalidades)."
+        }
+
 
     empresa = empresas_chile.find_one({"rut": rut})
 
@@ -355,7 +374,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         return {
             "error": "RUT no tiene historial ni está registrado en la base de empresas.",
             "plazo_recomendado": 30,
-            "recomendacion": "No existe información histórica. Plazo base 30 días."
+            "recomendacion": "No existe información histórica. Revisar empresas similares."
         }
 
     rubro = empresa.get("rubro")
