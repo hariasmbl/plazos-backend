@@ -356,8 +356,15 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
 
     if tipo_entidad in ["MUNICIPALIDAD", "CORP MUNICIPAL"]:
         # Entidad pública sin historial -> aplicar regla fija municipal verano
+
+        if tipo_entidad in ["MUNICIPALIDAD", "CORP MUNICIPAL"]:
+
+            # Buscar nombre en la base de empresas (TXT que cargaste)
+            empresa_base = empresas_chile.find_one({"rut": rut})
+            nombre = empresa_base.get("nombre") if empresa_base else "Entidad Municipal (sin nombre registrado)"
+
         return {
-            "nombre_deudor": "Entidad Municipal sin historial",
+            "nombre_deudor": nombre,
             "tipo_entidad": tipo_entidad,
             "plazo_recomendado": 105,
             "factor_dias": 7.5,
