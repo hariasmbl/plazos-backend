@@ -105,4 +105,6 @@ scripts/clasificacion_bl.py
 __pycache__/
 *.pyc
 
+scripts/extraer_muni.py
+
 
