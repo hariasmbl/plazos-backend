@@ -231,6 +231,15 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             if fec_emision and fec_pago:
                 plazo = (fec_pago - fec_emision).days
 
+                # Filtro de plazos erróneos
+                if plazo < 0 or plazo > 365:
+                    print(
+                        f"Ignorando plazo anómalo ({plazo} días) para RUT {rut} "
+                        f"doc {f.get('Nº DCTO')} ope {f.get('Nº OPE')} "
+                        f"(emisión={f.get('FEC EMISION DIG')}, pago={pago.get('Fecha Pago')})"
+                    )
+                    continue
+
                 registros_validos.append({
                     "fecha_ces": fecha_ces,
                     "fecha_emision": fec_emision,
@@ -356,12 +365,9 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
 
     if tipo_entidad in ["MUNICIPALIDAD", "CORP MUNICIPAL"]:
         # Entidad pública sin historial -> aplicar regla fija municipal verano
-
-        if tipo_entidad in ["MUNICIPALIDAD", "CORP MUNICIPAL"]:
-
-            # Buscar nombre en la base de empresas (TXT que cargaste)
-            empresa_base = empresas_chile.find_one({"rut": rut})
-            nombre = empresa_base.get("nombre") if empresa_base else "Entidad Municipal (sin nombre registrado)"
+        # Buscar nombre en la base de empresas (TXT que cargaste)
+        empresa_base = empresas_chile.find_one({"rut": rut})
+        nombre = empresa_base.get("nombre") if empresa_base else "Entidad Municipal (sin nombre registrado)"
 
         return {
             "nombre_deudor": nombre,
@@ -406,7 +412,13 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             fe = parse_fecha(f.get("FEC EMISION DIG"))
             fp = parse_fecha(pago.get("Fecha Pago"))
             if fe and fp:
-                plazos_sim.append((fp - fe).days)
+                plazo = (fp - fe).days
+
+                # filtro anti-basura
+                if plazo < 0 or plazo > 365:
+                    continue
+
+                plazos_sim.append(plazo)
 
     if not plazos_sim:
         return {
