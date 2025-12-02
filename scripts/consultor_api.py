@@ -232,7 +232,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
                 plazo = (fec_pago - fec_emision).days
 
                 # Filtro de plazos erróneos
-                if plazo < 0 or plazo > 365:
+                if plazo < 0 or plazo > 300:
                     print(
                         f"Ignorando plazo anómalo ({plazo} días) para RUT {rut} "
                         f"doc {f.get('Nº DCTO')} ope {f.get('Nº OPE')} "
