@@ -363,23 +363,27 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
     # -------------------------------------------
     tipo_entidad = obtener_tipo_entidad(rut)
 
-    if tipo_entidad in ["MUNICIPALIDAD", "CORP MUNICIPAL"]:
-        # Entidad pública sin historial -> aplicar regla fija municipal verano
-        # Buscar nombre en la base de empresas (TXT que cargaste)
+    if tipo_entidad in ["MUNICIPALIDAD", "CORP MUNICIPAL", "SERVIU / MINVU"]:
         empresa_base = empresas_chile.find_one({"rut": rut})
-        nombre = empresa_base.get("nombre") if empresa_base else "Entidad Municipal (sin nombre registrado)"
+        nombre = empresa_base.get("nombre") if empresa_base else "Entidad Pública (sin nombre registrado)"
+
+        if tipo_entidad == "SERVIU / MINVU":
+            plazo_recomendado = 225
+            recomendacion = "Se recomienda cubrir 225 días entre plazo y anticipo (regla SERVIU/MINVU)."
+        else:
+            plazo_recomendado = 105
+            recomendacion = "Se recomienda cubrir 105 días entre plazo y anticipo (promedio verano municipalidades)."
 
         return {
             "nombre_deudor": nombre,
             "tipo_entidad": tipo_entidad,
-            "plazo_recomendado": 105,
+            "plazo_recomendado": plazo_recomendado,
             "factor_dias": 7.5,
             "ultimos_pagos": [],
             "morosos": [],
             "empresas_similares": False,
-            "recomendacion": "Se recomienda cubrir 105 días entre plazo y anticipo (promedio verano municipalidades)."
+            "recomendacion": recomendacion
         }
-
 
     empresa = empresas_chile.find_one({"rut": rut})
 

@@ -9,6 +9,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 PATH_MUNI = os.path.join(BASE_DIR, "data", "listas_entidades", "muni_ruts.txt")
 PATH_CORP = os.path.join(BASE_DIR, "data", "listas_entidades", "corp_ruts.txt")
+PATH_SERVIU = os.path.join(BASE_DIR, "data", "listas_entidades", "serviu_minvu_ruts.txt")
+
 
 def cargar_ruts(path):
     if not os.path.exists(path):
@@ -19,6 +21,7 @@ def cargar_ruts(path):
 
 muni_ruts = cargar_ruts(PATH_MUNI)
 corp_ruts = cargar_ruts(PATH_CORP)
+serviu_ruts = cargar_ruts(PATH_SERVIU)
 
 print(f"📌 Cargados {len(muni_ruts)} RUTs de municipalidades")
 print(f"📌 Cargados {len(corp_ruts)} RUTs de corporaciones municipales")
@@ -71,6 +74,10 @@ def obtener_tipo_entidad(rut):
     # 3. Corporación municipal por lista oficial
     if rut in corp_ruts:
         return "CORP MUNICIPAL"
+    
+    # 4. SERVIU / MINVU por lista oficial
+    if rut in serviu_ruts:
+        return "SERVIU / MINVU"
 
     return None
 
@@ -104,6 +111,13 @@ def aplicar_reglas_verano(rut, promedio_verano, promedio_anual, desv_verano, des
         return {
             "plazo_recomendado": 60,
             "factor_dias": 7.5,  # mora 4%
+            "tipo": tipo
+        }
+
+    if tipo == "SERVIU / MINVU":
+        return {
+            "plazo_recomendado": 225,
+            "factor_dias": 7.5,
             "tipo": tipo
         }
 
