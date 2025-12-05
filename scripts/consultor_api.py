@@ -294,7 +294,11 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         factor_dias = reglas.get("factor_dias", 15)
         plazo_regla = reglas.get("plazo_recomendado")
 
-        if plazo_regla is not None and not np.isnan(plazo_regla):
+        # 🔧 Sobrescribir regla si es SERVIU/MINVU
+        if tipo == "SERVIU / MINVU":
+            plazo_recomendado = 225
+            factor_dias = 7.5
+        elif plazo_regla is not None and not np.isnan(plazo_regla):
             plazo_recomendado = plazo_regla
 
         morosos_data = []
