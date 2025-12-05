@@ -116,7 +116,7 @@ def aplicar_reglas_verano(rut, promedio_verano, promedio_anual, desv_verano, des
 
     if tipo == "SERVIU / MINVU":
         return {
-            "plazo_recomendado": 225,
+            "plazo_recomendado": 180,
             "factor_dias": 7.5,
             "tipo": tipo
         }

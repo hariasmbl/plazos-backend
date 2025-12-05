@@ -296,7 +296,7 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
 
         # 🔧 Sobrescribir regla si es SERVIU/MINVU
         if tipo == "SERVIU / MINVU":
-            plazo_recomendado = 225
+            plazo_recomendado = 180
             factor_dias = 7.5
         elif plazo_regla is not None and not np.isnan(plazo_regla):
             plazo_recomendado = plazo_regla
@@ -372,8 +372,8 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         nombre = empresa_base.get("nombre") if empresa_base else "Entidad Pública (sin nombre registrado)"
 
         if tipo_entidad == "SERVIU / MINVU":
-            plazo_recomendado = 225
-            recomendacion = "Se recomienda cubrir 225 días entre plazo y anticipo (regla SERVIU/MINVU)."
+            plazo_recomendado = 180
+            recomendacion = "Se recomienda cubrir 180 días entre plazo y anticipo (regla SERVIU/MINVU)."
         else:
             plazo_recomendado = 105
             recomendacion = "Se recomienda cubrir 105 días entre plazo y anticipo (promedio verano municipalidades)."
