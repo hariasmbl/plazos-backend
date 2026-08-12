@@ -82,21 +82,22 @@ def mover_a_procesados(path):
     shutil.move(path, nuevo_path)
     print(f"📦 Archivo movido a: {nuevo_path}")
 
-# Buscar archivos válidos para carga
-archivos = [
-    os.path.join("data", f)
-    for f in os.listdir("data")
-    if f.lower().endswith((".xls", ".xlsx"))
-    and "procesados" not in f.lower()
-    and "list docs" not in f.lower()
-]
+if __name__ == "__main__":
+    # Buscar archivos válidos para carga
+    archivos = [
+        os.path.join("data", f)
+        for f in os.listdir("data")
+        if f.lower().endswith((".xls", ".xlsx"))
+        and "procesados" not in f.lower()
+        and "list docs" not in f.lower()
+    ]
 
-# Procesar archivos
-for archivo in archivos:
-    if os.path.exists(archivo):
-        df = cargar_y_limpiar_excel(archivo)
-        if not df.empty:
-            insertar_documentos(df, os.path.basename(archivo))
-            mover_a_procesados(archivo)
-    else:
-        print(f"⚠️ Archivo no encontrado: {archivo}")
+    # Procesar archivos
+    for archivo in archivos:
+        if os.path.exists(archivo):
+            df = cargar_y_limpiar_excel(archivo)
+            if not df.empty:
+                insertar_documentos(df, os.path.basename(archivo))
+                mover_a_procesados(archivo)
+        else:
+            print(f"⚠️ Archivo no encontrado: {archivo}")
