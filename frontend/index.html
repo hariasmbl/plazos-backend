@@ -27,7 +27,8 @@
     </div>
 
     <div id="appContent" class="hidden">
-      <div class="flex justify-end mb-4">
+      <div class="flex justify-end gap-2 mb-4">
+        <button id="adminBtn" onclick="window.open('admin.html', '_blank')" class="hidden bg-blue-100 text-blue-800 px-3 py-1 text-sm rounded hover:bg-blue-200">Panel de carga</button>
         <button id="logoutBtn" class="bg-gray-300 px-3 py-1 text-sm rounded hover:bg-gray-400">Cerrar sesión</button>
       </div>
 
@@ -390,8 +391,21 @@
 
     const loginBtn = document.getElementById("loginBtn");
     const logoutBtn = document.getElementById("logoutBtn");
+    const adminBtn = document.getElementById("adminBtn");
     const authSection = document.getElementById("authSection");
     const appContent = document.getElementById("appContent");
+
+    async function esAdmin(email) {
+      try {
+        const res = await fetch("admins.txt");
+        const texto = await res.text();
+        const admins = texto.split("\n").map(l => l.trim().toLowerCase()).filter(Boolean);
+        return admins.includes(email.toLowerCase());
+      } catch (e) {
+        console.error("No se pudo verificar la lista de admins:", e);
+        return false;
+      }
+    }
 
     // --- EVENTOS ---
     loginBtn?.addEventListener("click", () => {
@@ -405,13 +419,15 @@
     });
 
     // --- AUTH ---
-    onAuthStateChanged(auth, (user) => {
+    onAuthStateChanged(auth, async (user) => {
       if (user && user.email.endsWith("@blcapital.cl")) {
         authSection.classList.add("hidden");
         appContent.classList.remove("hidden");
+        adminBtn.classList.toggle("hidden", !(await esAdmin(user.email)));
       } else {
         authSection.classList.remove("hidden");
         appContent.classList.add("hidden");
+        adminBtn.classList.add("hidden");
       }
     });
 

@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Query, UploadFile, File
+from fastapi import FastAPI, Query, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from datetime import datetime
@@ -490,9 +491,11 @@ async def subir_pagos(file: UploadFile = File(...)):
     return await guardar_archivo(file, "cartola")
 
 
-@app.post("/subir-empresas")
-async def subir_empresas(file: UploadFile = File(...)):
-    return await guardar_archivo(file, "empresas")
+def actualizar_estado_carga(tipo, estado, mensaje=None, tocar_fecha=False):
+    campos = {"tipo": tipo, "estado": estado, "mensaje": mensaje}
+    if tocar_fecha:
+        campos["ultima_actualizacion"] = datetime.now()
+    db["metadata"].update_one({"tipo": tipo}, {"$set": campos}, upsert=True)
 
 
 async def guardar_archivo(file: UploadFile, tipo: str):
@@ -508,6 +511,7 @@ async def guardar_archivo(file: UploadFile, tipo: str):
             df = cargar_excel(ruta)
             if not df.empty:
                 resumen = insertar_documentos(df, filename)
+                actualizar_estado_carga("docs", "listo", tocar_fecha=True)
                 return {"mensaje": f"Archivo {filename} procesado", "resumen": resumen}
 
         elif tipo == "cartola":
@@ -515,14 +519,68 @@ async def guardar_archivo(file: UploadFile, tipo: str):
             df = cargar_y_limpiar_excel(ruta)
             if not df.empty:
                 resumen = insertar_documentos(df, filename)
+                actualizar_estado_carga("pagos", "listo", tocar_fecha=True)
                 return {"mensaje": f"Archivo {filename} procesado", "resumen": resumen}
 
-        elif tipo == "empresas":
-            from scripts.cargar_empresas import procesar_txt
-            procesar_txt(ruta)
-            return {"mensaje": f"Empresas actualizadas desde {filename}"}
-
-        return {"mensaje": "Archivo sin datos válidos"}
+        return JSONResponse(status_code=400, content={"mensaje": "Archivo sin datos válidos"})
 
     except Exception as e:
-        return {"mensaje": f"Error al subir archivo: {str(e)}"}
+        return JSONResponse(status_code=500, content={"mensaje": f"Error al subir archivo: {str(e)}"})
+
+
+# ------------------------------------------------------------
+# Empresas: archivo del SII (~1GB), se procesa en segundo plano
+# para no dejar la request colgada ni bloquear otras consultas.
+# ------------------------------------------------------------
+
+def procesar_empresas_background(ruta):
+    from scripts.cargar_empresas import procesar_txt
+    try:
+        total = procesar_txt(ruta)
+        actualizar_estado_carga("empresas", "listo", mensaje=f"{total} empresas cargadas", tocar_fecha=True)
+    except Exception as e:
+        actualizar_estado_carga("empresas", "error", mensaje=str(e))
+    finally:
+        if os.path.exists(ruta):
+            os.remove(ruta)
+
+
+@app.post("/subir-empresas")
+async def subir_empresas(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    try:
+        filename = file.filename
+        ruta = os.path.join(UPLOAD_FOLDER, filename)
+
+        with open(ruta, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        actualizar_estado_carga("empresas", "procesando")
+        background_tasks.add_task(procesar_empresas_background, ruta)
+
+        return {"mensaje": f"Archivo {filename} recibido, procesando en segundo plano."}
+
+    except Exception as e:
+        actualizar_estado_carga("empresas", "error", mensaje=str(e))
+        return JSONResponse(status_code=500, content={"mensaje": f"Error al subir archivo: {str(e)}"})
+
+
+@app.get("/estado-carga")
+def estado_carga():
+    registros = {
+        r["tipo"]: r
+        for r in db["metadata"].find({"tipo": {"$in": ["docs", "pagos", "empresas"]}})
+    }
+
+    def resumen(tipo):
+        r = registros.get(tipo, {})
+        return {
+            "estado": r.get("estado"),
+            "mensaje": r.get("mensaje"),
+            "ultima_actualizacion": r.get("ultima_actualizacion"),
+        }
+
+    return {
+        "docs": resumen("docs"),
+        "pagos": resumen("pagos"),
+        "empresas": resumen("empresas"),
+    }

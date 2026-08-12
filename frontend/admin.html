@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Panel de Carga - BL Capital</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-white text-gray-800 font-sans">
+  <header class="bg-blue-900 text-white shadow">
+    <div class="max-w-6xl mx-auto flex justify-between items-center p-4">
+      <img src="assets/logo.png" alt="BL Capital" class="h-10">
+      <h1 class="text-xl font-semibold">Panel de Carga de Archivos</h1>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto mt-10 p-4">
+    <div id="authSection" class="text-center">
+      <p class="text-lg mb-4">Accede con tu cuenta corporativa @blcapital.cl</p>
+      <button id="loginBtn" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">Iniciar sesión con Google</button>
+    </div>
+
+    <div id="deniedSection" class="hidden text-center">
+      <p class="text-lg text-red-600 font-semibold">No tienes permiso para ver esta página.</p>
+    </div>
+
+    <div id="appContent" class="hidden space-y-10">
+
+      <section class="border rounded p-4">
+        <h2 class="text-lg font-semibold text-blue-800 mb-1">Documentos (facturas)</h2>
+        <p class="text-sm text-gray-600 mb-3">Última actualización: <strong id="fechaDocs">Cargando...</strong></p>
+        <div class="flex gap-3 items-center">
+          <input type="file" id="fileDocs" class="border rounded px-2 py-1 text-sm">
+          <button onclick="subir('fileDocs', '/subir-docs', 'docs', 'msgDocs')" class="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-800 text-sm">Subir documentos</button>
+        </div>
+        <p id="msgDocs" class="text-sm mt-2"></p>
+      </section>
+
+      <section class="border rounded p-4">
+        <h2 class="text-lg font-semibold text-blue-800 mb-1">Pagos (cartola)</h2>
+        <p class="text-sm text-gray-600 mb-3">Última actualización: <strong id="fechaPagos">Cargando...</strong></p>
+        <div class="flex gap-3 items-center">
+          <input type="file" id="filePagos" class="border rounded px-2 py-1 text-sm">
+          <button onclick="subir('filePagos', '/subir-pagos', 'pagos', 'msgPagos')" class="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-800 text-sm">Subir pagos</button>
+        </div>
+        <p id="msgPagos" class="text-sm mt-2"></p>
+      </section>
+
+      <section class="border-2 border-yellow-400 bg-yellow-50 rounded p-4">
+        <h2 class="text-lg font-semibold text-yellow-800 mb-1">Empresas (base SII)</h2>
+        <p class="text-sm text-yellow-800 mb-3">
+          ⚠️ Esto <strong>reemplaza por completo</strong> la base de empresas actual. El archivo del SII es grande (~1 GB) y puede tardar varios minutos en subir y procesarse.
+        </p>
+        <p class="text-sm text-gray-600 mb-3">Última actualización: <strong id="fechaEmpresas">Cargando...</strong></p>
+        <div class="flex gap-3 items-center">
+          <input type="file" id="fileEmpresas" class="border rounded px-2 py-1 text-sm">
+          <button id="btnEmpresas" onclick="subir('fileEmpresas', '/subir-empresas', 'empresas', 'msgEmpresas')" class="bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">Subir empresas</button>
+        </div>
+        <p id="msgEmpresas" class="text-sm mt-2"></p>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="bg-gray-100 text-center text-sm py-4 text-gray-600">
+    &copy; 2025 BL Capital. Todos los derechos reservados.
+  </footer>
+
+  <script>
+    const API_BASE = "https://plazos-backend.onrender.com";
+
+    function formatFecha(fechaStr) {
+      if (!fechaStr) return "Sin registro";
+      const fecha = new Date(fechaStr);
+      const d = String(fecha.getDate()).padStart(2, '0');
+      const m = String(fecha.getMonth() + 1).padStart(2, '0');
+      const y = fecha.getFullYear();
+      const hh = String(fecha.getHours()).padStart(2, '0');
+      const mm = String(fecha.getMinutes()).padStart(2, '0');
+      return `${d}-${m}-${y} ${hh}:${mm}`;
+    }
+
+    let pollEmpresas = null;
+
+    function pintarEmpresas(info) {
+      info = info || {};
+      document.getElementById("fechaEmpresas").textContent = formatFecha(info.ultima_actualizacion);
+
+      const msg = document.getElementById("msgEmpresas");
+      const boton = document.getElementById("btnEmpresas");
+
+      if (info.estado === "procesando") {
+        msg.textContent = "Procesando en segundo plano, puede tardar varios minutos...";
+        msg.className = "text-sm mt-2 text-gray-600";
+        boton.disabled = true;
+      } else if (info.estado === "error") {
+        msg.textContent = "Error: " + (info.mensaje || "no se pudo procesar el archivo.");
+        msg.className = "text-sm mt-2 text-red-600";
+        boton.disabled = false;
+      } else if (info.estado === "listo") {
+        msg.textContent = info.mensaje || "Cargado correctamente.";
+        msg.className = "text-sm mt-2 text-green-700";
+        boton.disabled = false;
+      } else {
+        boton.disabled = false;
+      }
+    }
+
+    async function cargarFechas() {
+      try {
+        const res = await fetch(`${API_BASE}/estado-carga`);
+        const data = await res.json();
+        document.getElementById("fechaDocs").textContent = formatFecha(data.docs?.ultima_actualizacion);
+        document.getElementById("fechaPagos").textContent = formatFecha(data.pagos?.ultima_actualizacion);
+        pintarEmpresas(data.empresas);
+
+        if (data.empresas?.estado === "procesando") {
+          iniciarPollingEmpresas();
+        }
+      } catch (e) {
+        console.error("No se pudo obtener el estado de carga:", e);
+      }
+    }
+
+    function iniciarPollingEmpresas() {
+      if (pollEmpresas) return;
+      pollEmpresas = setInterval(async () => {
+        try {
+          const res = await fetch(`${API_BASE}/estado-carga`);
+          const data = await res.json();
+          pintarEmpresas(data.empresas);
+          if (data.empresas?.estado !== "procesando") {
+            clearInterval(pollEmpresas);
+            pollEmpresas = null;
+          }
+        } catch (e) {
+          console.error("Error consultando estado de empresas:", e);
+        }
+      }, 5000);
+    }
+
+    async function subir(inputId, endpoint, tipo, msgId) {
+      const input = document.getElementById(inputId);
+      const msg = document.getElementById(msgId);
+
+      if (!input.files.length) {
+        msg.textContent = "Selecciona un archivo primero.";
+        msg.className = "text-sm mt-2 text-red-600";
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", input.files[0]);
+
+      msg.textContent = tipo === "empresas"
+        ? "Subiendo archivo (puede tardar varios minutos)..."
+        : "Subiendo y procesando...";
+      msg.className = "text-sm mt-2 text-gray-600";
+
+      try {
+        const res = await fetch(`${API_BASE}${endpoint}`, {
+          method: "POST",
+          body: formData
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          msg.textContent = data.mensaje || "Error al procesar el archivo.";
+          msg.className = "text-sm mt-2 text-red-600";
+          return;
+        }
+
+        input.value = "";
+
+        if (tipo === "empresas") {
+          msg.textContent = data.mensaje || "Archivo recibido.";
+          iniciarPollingEmpresas();
+        } else {
+          msg.textContent = data.mensaje || "Listo.";
+          msg.className = "text-sm mt-2 text-green-700";
+          cargarFechas();
+        }
+      } catch (e) {
+        msg.textContent = "Error al subir el archivo: " + e.message;
+        msg.className = "text-sm mt-2 text-red-600";
+      }
+    }
+  </script>
+
+  <script type="module">
+  document.addEventListener("DOMContentLoaded", async () => {
+
+    const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js");
+    const { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged } =
+      await import("https://www.gstatic.com/firebasejs/10.11.0/firebase-auth.js");
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAUtJoJRUGDwpGhLXr-0WhGvtKlr0YwNWY",
+      authDomain: "plazos-bl.firebaseapp.com",
+      projectId: "plazos-bl",
+      storageBucket: "plazos-bl.firebasestorage.app",
+      messagingSenderId: "39828725985",
+      appId: "1:39828725985:web:f414fa57db531758d397a0"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+
+    const loginBtn = document.getElementById("loginBtn");
+    const authSection = document.getElementById("authSection");
+    const deniedSection = document.getElementById("deniedSection");
+    const appContent = document.getElementById("appContent");
+
+    async function esAdmin(email) {
+      try {
+        const res = await fetch("admins.txt");
+        const texto = await res.text();
+        const admins = texto.split("\n").map(l => l.trim().toLowerCase()).filter(Boolean);
+        return admins.includes(email.toLowerCase());
+      } catch (e) {
+        console.error("No se pudo verificar la lista de admins:", e);
+        return false;
+      }
+    }
+
+    loginBtn?.addEventListener("click", () => {
+      signInWithPopup(auth, provider).catch((error) => {
+        alert("Error al iniciar sesión: " + error.message);
+      });
+    });
+
+    onAuthStateChanged(auth, async (user) => {
+      authSection.classList.add("hidden");
+      deniedSection.classList.add("hidden");
+      appContent.classList.add("hidden");
+
+      if (!user || !user.email.endsWith("@blcapital.cl")) {
+        authSection.classList.remove("hidden");
+        return;
+      }
+
+      if (!(await esAdmin(user.email))) {
+        deniedSection.classList.remove("hidden");
+        return;
+      }
+
+      appContent.classList.remove("hidden");
+      cargarFechas();
+    });
+
+  });
+  </script>
+
+</body>
+</html>
