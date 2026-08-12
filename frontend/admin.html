@@ -14,6 +14,8 @@
     </div>
   </header>
 
+  <div id="toast" class="hidden fixed top-4 right-4 max-w-sm shadow-lg rounded-lg p-4 z-50"></div>
+
   <main class="max-w-3xl mx-auto mt-10 p-4">
     <div id="authSection" class="text-center">
       <p class="text-lg mb-4">Accede con tu cuenta corporativa @blcapital.cl</p>
@@ -80,7 +82,31 @@
       return `${d}-${m}-${y} ${hh}:${mm}`;
     }
 
+    function mostrarToast(html, tipo = "success") {
+      const toast = document.getElementById("toast");
+      const colores = {
+        success: "bg-green-50 border border-green-400 text-green-800",
+        error: "bg-red-50 border border-red-400 text-red-800"
+      };
+      toast.className = `fixed top-4 right-4 max-w-sm shadow-lg rounded-lg p-4 z-50 ${colores[tipo] || colores.success}`;
+      toast.innerHTML = html + `<button onclick="this.parentElement.classList.add('hidden')" class="text-xs underline mt-2 block">Cerrar</button>`;
+      toast.classList.remove("hidden");
+
+      clearTimeout(toast._timeout);
+      toast._timeout = setTimeout(() => toast.classList.add("hidden"), 8000);
+    }
+
+    function toastResumen(mensaje, resumen) {
+      mostrarToast(`
+        <p class="font-semibold mb-1">${mensaje}</p>
+        <p class="text-sm">🆕 Nuevos: <strong>${resumen.nuevos ?? 0}</strong></p>
+        <p class="text-sm">🔁 Duplicados: <strong>${resumen.duplicados ?? 0}</strong></p>
+        ${resumen.actualizados !== undefined ? `<p class="text-sm">🔄 Actualizados: <strong>${resumen.actualizados}</strong></p>` : ''}
+      `, "success");
+    }
+
     let pollEmpresas = null;
+    let empresasEnCurso = false;
 
     function pintarEmpresas(info) {
       info = info || {};
@@ -132,6 +158,15 @@
           if (data.empresas?.estado !== "procesando") {
             clearInterval(pollEmpresas);
             pollEmpresas = null;
+
+            if (empresasEnCurso) {
+              empresasEnCurso = false;
+              if (data.empresas?.estado === "listo") {
+                mostrarToast(`<p class="font-semibold">Empresas actualizadas</p><p class="text-sm">${data.empresas.mensaje || ""}</p>`, "success");
+              } else if (data.empresas?.estado === "error") {
+                mostrarToast(`<p class="font-semibold">Error al cargar empresas</p><p class="text-sm">${data.empresas.mensaje || ""}</p>`, "error");
+              }
+            }
           }
         } catch (e) {
           console.error("Error consultando estado de empresas:", e);
@@ -174,10 +209,14 @@
 
         if (tipo === "empresas") {
           msg.textContent = data.mensaje || "Archivo recibido.";
+          empresasEnCurso = true;
           iniciarPollingEmpresas();
         } else {
           msg.textContent = data.mensaje || "Listo.";
           msg.className = "text-sm mt-2 text-green-700";
+          if (data.resumen) {
+            toastResumen(data.mensaje || "Archivo procesado", data.resumen);
+          }
           cargarFechas();
         }
       } catch (e) {

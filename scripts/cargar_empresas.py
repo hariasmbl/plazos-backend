@@ -26,6 +26,11 @@ def procesar_txt(ruta):
       atomico), para no dejar la coleccion a medias si algo falla a mitad
       de camino.
 
+    Cada carga reemplaza por completo el documento anterior (no es una
+    actualización incremental), así que da lo mismo si hay RUTs repetidos
+    dentro del archivo — el dedup por RUT es solo para que 'empresas' no
+    quede con documentos ambiguos, no se reporta como dato relevante.
+
     Devuelve la cantidad de empresas cargadas. Lanza una excepción si el
     archivo no se pudo procesar o no contiene registros válidos.
     """
