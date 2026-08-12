@@ -165,41 +165,13 @@ def es_outlier(valor, promedio, desviacion):
     return abs(z) > 2.0
 
 
-# ============================================================
-# 🔍 DEBUG FORMATO DOC / OPE 
-# ============================================================
-
-@app.get("/debug-format")
-def debug_format(rut: str):
-
-    facturas = list(docs.find({"RUT DEUDOR": rut}))
-    pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
-
-    def limpiar_factura(f):
-        return {
-            "Nº DCTO": f.get("Nº DCTO"),
-            "Nº OPE": f.get("Nº OPE")
-        }
-
-    def limpiar_pago(p):
-        return {
-            "Nª Doc.": p.get("Nª Doc."),
-            "Nº Ope.": p.get("Nº Ope.")
-        }
-
-    return {
-        "docs": [limpiar_factura(f) for f in facturas],
-        "pagos": [limpiar_pago(p) for p in pagos_deudor]
-    }
-
-
-# ============================================================
-# 🔍 CONSULTAR RUT
-# ============================================================
-
-@app.get("/consultar-rut")
-def consultar_por_rut(rut: str = Query(..., alias="rut")):
-
+def cruzar_facturas_pagos(rut):
+    """
+    Cruza facturas y pagos de un RUT deudor.
+    Devuelve (facturas, pagos_dict, registros_validos, registros_limpios, promedio, desviacion),
+    donde registros_validos excluye plazos anómalos (<0 o >300 días) y
+    registros_limpios además excluye outliers (z-score > 2 sobre registros_validos).
+    """
     facturas = list(docs.find({"RUT DEUDOR": rut}))
     pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
 
@@ -208,9 +180,6 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         clave = normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope."))
         if clave:
             pagos_dict[clave] = p
-
-    if pagos_deudor:
-        print("Ejemplo pago:", list(pagos_deudor[0].keys()))
 
     registros_validos = []
 
@@ -255,16 +224,59 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
                     }
                 })
 
+    if not registros_validos:
+        return facturas, pagos_dict, [], [], None, None
+
+    plazos = [r["plazo"] for r in registros_validos]
+    promedio = np.mean(plazos)
+    desviacion = np.std(plazos)
+
+    registros_limpios = [
+        r for r in registros_validos
+        if not es_outlier(r["plazo"], promedio, desviacion)
+    ]
+
+    return facturas, pagos_dict, registros_validos, registros_limpios, promedio, desviacion
+
+
+# ============================================================
+# 🔍 DEBUG FORMATO DOC / OPE
+# ============================================================
+
+@app.get("/debug-format")
+def debug_format(rut: str):
+
+    facturas = list(docs.find({"RUT DEUDOR": rut}))
+    pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
+
+    def limpiar_factura(f):
+        return {
+            "Nº DCTO": f.get("Nº DCTO"),
+            "Nº OPE": f.get("Nº OPE")
+        }
+
+    def limpiar_pago(p):
+        return {
+            "Nª Doc.": p.get("Nª Doc."),
+            "Nº Ope.": p.get("Nº Ope.")
+        }
+
+    return {
+        "docs": [limpiar_factura(f) for f in facturas],
+        "pagos": [limpiar_pago(p) for p in pagos_deudor]
+    }
+
+
+# ============================================================
+# 🔍 CONSULTAR RUT
+# ============================================================
+
+@app.get("/consultar-rut")
+def consultar_por_rut(rut: str = Query(..., alias="rut")):
+
+    facturas, pagos_dict, registros_validos, registros_limpios, promedio, desviacion = cruzar_facturas_pagos(rut)
+
     if registros_validos:
-
-        plazos = [r["plazo"] for r in registros_validos]
-        promedio = np.mean(plazos)
-        desviacion = np.std(plazos)
-
-        registros_limpios = [
-            r for r in registros_validos
-            if not es_outlier(r["plazo"], promedio, desviacion)
-        ]
 
         if not registros_limpios:
             return {"error": "Todos los registros fueron considerados outliers."}
@@ -452,6 +464,34 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         "ultimos_pagos": [],
         "morosos": [],
         "empresas_similares": True
+    }
+
+
+# ============================================================
+# 📜 HISTÓRICO DE PAGOS (todos, no solo los últimos 5)
+# ============================================================
+
+@app.get("/historico-pagos")
+def historico_pagos(rut: str = Query(..., alias="rut")):
+
+    facturas, pagos_dict, registros_validos, registros_limpios, promedio, desviacion = cruzar_facturas_pagos(rut)
+
+    if not facturas:
+        return {"error": "No se encontraron documentos para este RUT.", "pagos": []}
+
+    if not registros_limpios:
+        return {
+            "nombre_deudor": facturas[0].get("DEUDOR", "Desconocido"),
+            "error": "No se encontraron pagos históricos válidos para este RUT.",
+            "pagos": []
+        }
+
+    registros_limpios.sort(key=lambda x: x["fecha_pago"], reverse=True)
+
+    return {
+        "nombre_deudor": facturas[0].get("DEUDOR", "Desconocido"),
+        "cantidad": len(registros_limpios),
+        "pagos": registros_limpios
     }
 
 

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Histórico de Pagos - BL Capital</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-white text-gray-800 font-sans">
+  <header class="bg-blue-900 text-white shadow">
+    <div class="max-w-6xl mx-auto flex justify-between items-center p-4">
+      <img src="assets/logo.png" alt="BL Capital" class="h-10">
+      <h1 class="text-xl font-semibold">Histórico de Pagos</h1>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto mt-10 p-4">
+    <div id="authSection" class="text-center">
+      <p class="text-lg mb-4">Accede con tu cuenta corporativa @blcapital.cl</p>
+      <button id="loginBtn" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">Iniciar sesión con Google</button>
+    </div>
+
+    <div id="appContent" class="hidden">
+      <div id="contenido"></div>
+    </div>
+  </main>
+
+  <footer class="bg-gray-100 text-center text-sm py-4 text-gray-600">
+    &copy; 2025 BL Capital. Todos los derechos reservados.
+  </footer>
+
+  <script>
+    function formatFecha(fechaStr) {
+      if (!fechaStr) return 'N/A';
+      const fecha = new Date(fechaStr);
+      const d = String(fecha.getDate()).padStart(2, '0');
+      const m = String(fecha.getMonth() + 1).padStart(2, '0');
+      const y = fecha.getFullYear();
+      return `${d}-${m}-${y}`;
+    }
+
+    async function cargarHistorico() {
+      const params = new URLSearchParams(window.location.search);
+      const rut = params.get('rut');
+      const contenido = document.getElementById('contenido');
+
+      if (!rut) {
+        contenido.innerHTML = `<p class="text-red-600 font-semibold">Falta el RUT en la URL.</p>`;
+        return;
+      }
+
+      contenido.innerHTML = `<p class="text-gray-600">Cargando histórico de pagos...</p>`;
+
+      let data;
+      try {
+        const res = await fetch(`https://plazos-backend.onrender.com/historico-pagos?rut=${encodeURIComponent(rut)}`, {
+          method: "GET",
+          mode: "cors"
+        });
+        data = await res.json();
+      } catch (e) {
+        contenido.innerHTML = `<p class="text-red-600 font-semibold">Error al consultar el histórico: ${e.message}</p>`;
+        return;
+      }
+
+      if (data.error) {
+        contenido.innerHTML = `<p class="text-red-600 font-semibold">${data.error}</p>`;
+        return;
+      }
+
+      const pagos = Array.isArray(data.pagos) ? data.pagos : [];
+
+      if (pagos.length === 0) {
+        contenido.innerHTML = `<p class="text-gray-600">No hay pagos históricos para este RUT.</p>`;
+        return;
+      }
+
+      const filas = pagos.map(p => `
+        <tr class="border-t">
+          <td class="px-3 py-2 text-center">${(p.monto || 0).toLocaleString()}</td>
+          <td class="px-3 py-2 text-center">${formatFecha(p.fecha_ces)}</td>
+          <td class="px-3 py-2 text-center">${formatFecha(p.fecha_emision)}</td>
+          <td class="px-3 py-2 text-center">${formatFecha(p.fecha_pago)}</td>
+          <td class="px-3 py-2 text-center">${p.plazo ?? 'N/A'}</td>
+        </tr>`).join('');
+
+      contenido.innerHTML = `
+        <h2 class="text-xl font-bold text-blue-800 mb-1">Deudor: ${data.nombre_deudor || "Sin nombre"}</h2>
+        <p class="text-sm text-gray-600 mb-4">RUT: ${rut} — ${data.cantidad} pago(s) encontrado(s)</p>
+        <table class="w-full border">
+          <thead class="bg-gray-100">
+            <tr>
+              <th>Monto Factura</th>
+              <th>Fecha Compra</th>
+              <th>Fecha Emisión</th>
+              <th>Fecha Pago</th>
+              <th>Plazo (Días)</th>
+            </tr>
+          </thead>
+          <tbody>${filas}</tbody>
+        </table>`;
+    }
+  </script>
+
+  <script type="module">
+  document.addEventListener("DOMContentLoaded", async () => {
+
+    const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js");
+    const { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged } =
+      await import("https://www.gstatic.com/firebasejs/10.11.0/firebase-auth.js");
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAUtJoJRUGDwpGhLXr-0WhGvtKlr0YwNWY",
+      authDomain: "plazos-bl.firebaseapp.com",
+      projectId: "plazos-bl",
+      storageBucket: "plazos-bl.firebasestorage.app",
+      messagingSenderId: "39828725985",
+      appId: "1:39828725985:web:f414fa57db531758d397a0"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+
+    const loginBtn = document.getElementById("loginBtn");
+    const authSection = document.getElementById("authSection");
+    const appContent = document.getElementById("appContent");
+
+    loginBtn?.addEventListener("click", () => {
+      signInWithPopup(auth, provider).catch((error) => {
+        alert("Error al iniciar sesión: " + error.message);
+      });
+    });
+
+    onAuthStateChanged(auth, (user) => {
+      if (user && user.email.endsWith("@blcapital.cl")) {
+        authSection.classList.add("hidden");
+        appContent.classList.remove("hidden");
+        cargarHistorico();
+      } else {
+        authSection.classList.remove("hidden");
+        appContent.classList.add("hidden");
+      }
+    });
+
+  });
+  </script>
+
+</body>
+</html>
