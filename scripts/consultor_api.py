@@ -6,28 +6,12 @@ from datetime import datetime
 import numpy as np
 import os
 import shutil
-import re
-import unicodedata
 
 from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad
 
 
 # ============================================================
 # 🔧 Normalización de claves
-# ============================================================
-
-def normalizar_valor(x):
-    if x is None:
-        return None
-    x = str(x).strip()
-    x = unicodedata.normalize("NFKD", x).encode("ascii", "ignore").decode()
-    x = re.sub(r"[^A-Za-z0-9]", "", x)
-    x = x.lstrip("0")
-    return x.upper()
-
-
-# ============================================================
-# ✅ ÚNICO CAMBIO AUTORIZADO: nueva versión de normalizar_clave
 # ============================================================
 
 def normalizar_clave(n_doc, n_ope):
@@ -66,32 +50,6 @@ def normalizar_clave(n_doc, n_ope):
         return None
 
     return (str(d), str(o))
-
-
-def get_doc_number(row):
-    return (
-        row.get("Nº DCTO")
-        or row.get("N° DCTO")
-        or row.get("NRO DCTO")
-        or row.get("Nª Doc.")
-        or row.get("Na Doc.")
-        or row.get("N° Doc.")
-        or row.get("Nº Doc.")
-        or row.get("Nro Doc.")
-        or row.get("N° Documento")
-    )
-
-
-def get_ope_number(row):
-    return (
-        row.get("Nº OPE")
-        or row.get("N° OPE")
-        or row.get("Nro Ope.")
-        or row.get("Nº Ope.")
-        or row.get("N° Ope.")
-        or row.get("N OPE")
-        or row.get("NRO OPE")
-    )
 
 
 # ============================================================
