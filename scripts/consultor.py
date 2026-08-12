@@ -56,6 +56,41 @@ def es_outlier(valor, promedio, desviacion):
     z = (valor - promedio) / desviacion
     return abs(z) > 2.0
 
+
+def normalizar_clave(n_doc, n_ope):
+    """
+    Conversión robusta:
+    - Acepta int, str, '00123', '123.0'
+    - Elimina ceros iniciales
+    - Retorna siempre ('123','456') como strings
+    """
+
+    def to_int_like(x):
+        if x is None:
+            return None
+        s = str(x).strip()
+
+        if s == "":
+            return None
+
+        s = s.replace(" ", "")
+
+        if s.isdigit():
+            return int(s)
+
+        try:
+            return int(float(s))
+        except:
+            return None
+
+    d = to_int_like(n_doc)
+    o = to_int_like(n_ope)
+
+    if d is None or o is None:
+        return None
+
+    return (str(d), str(o))
+
 # -----------------------------
 # Clasificación desde Excel
 # -----------------------------
@@ -154,13 +189,22 @@ def consultar_por_rut(rut_deudor):
         }
 
     pagos_deudor = list(pagos.find({"Rut Deudor": rut_deudor}))
-    pagos_dict = {(p.get("Nª Doc."), p.get("Nº Ope.")): p for p in pagos_deudor}
+
+    pagos_dict = {}
+    for p in pagos_deudor:
+        clave = normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope."))
+        if clave:
+            pagos_dict[clave] = p
 
     registros_validos = []
 
     for f in facturas:
-        clave = (f.get("Nº DCTO"), f.get("Nº OPE"))
-        pago = pagos_dict.get(clave)
+        clave_f = normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
+
+        if not clave_f:
+            continue
+
+        pago = pagos_dict.get(clave_f)
 
         if pago:
             fec_emision = parse_fecha(f.get("FEC EMISION DIG"))
@@ -170,6 +214,11 @@ def consultar_por_rut(rut_deudor):
 
             if fec_emision and fec_pago:
                 plazo = (fec_pago - fec_emision).days
+
+                # Mismo filtro de plazos anómalos que usa la API
+                if plazo < 0 or plazo > 300:
+                    continue
+
                 registros_validos.append({
                     "fecha_ces": fecha_ces,
                     "fecha_emision": fec_emision,

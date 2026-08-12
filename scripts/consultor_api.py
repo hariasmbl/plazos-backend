@@ -7,49 +7,7 @@ import numpy as np
 import os
 import shutil
 
-from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad
-
-
-# ============================================================
-# 🔧 Normalización de claves
-# ============================================================
-
-def normalizar_clave(n_doc, n_ope):
-    """
-    Conversión robusta:
-    - Acepta int, str, '00123', '123.0'
-    - Elimina ceros iniciales
-    - Retorna siempre ('123','456') como strings
-    """
-
-    def to_int_like(x):
-        if x is None:
-            return None
-        s = str(x).strip()
-
-        if s == "":
-            return None
-
-        # quitar espacios y posibles separadores o basura
-        s = s.replace(" ", "")
-
-        # si es entero puro
-        if s.isdigit():
-            return int(s)
-
-        # si es un float del tipo "123.0"
-        try:
-            return int(float(s))
-        except:
-            return None
-
-    d = to_int_like(n_doc)
-    o = to_int_like(n_ope)
-
-    if d is None or o is None:
-        return None
-
-    return (str(d), str(o))
+from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad, normalizar_clave
 
 
 # ============================================================
