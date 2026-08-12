@@ -285,6 +285,9 @@
     // ==========================================================
     // FUNCIÓN SIMULAR — ya incluye factor personalizado
     // ==========================================================
+    const PLAZO_MIN_DIAS = 30;
+    const PLAZO_MAX_DIAS = 100;
+
     function simular(plazoRecomendado, factorDias = 15) {
       const plazo = parseInt(document.getElementById('plazo').value);
       const anticipo = parseFloat(document.getElementById('anticipo').value);
@@ -296,12 +299,28 @@
         return;
       }
 
+      confirmarBtn.disabled = false;
+
+      // Cota de días de plazo, independiente del anticipo
+      if (plazo < PLAZO_MIN_DIAS) {
+        simulacionAprobada = false;
+        resultado.innerHTML = `
+          <p class="text-yellow-700">⚠️ Plazo menor a ${PLAZO_MIN_DIAS} días: debe ser revisado por Riesgo.</p>`;
+        return;
+      }
+
+      if (plazo > PLAZO_MAX_DIAS) {
+        simulacionAprobada = false;
+        resultado.innerHTML = `
+          <p class="text-yellow-700">⚠️ Plazo superior a ${PLAZO_MAX_DIAS} días: debe ser revisado por Riesgo.</p>`;
+        return;
+      }
+
       const puntos_anticipo = 100 - anticipo;
       const dias_extra = puntos_anticipo * factorDias;
       const total = Math.floor(plazo + dias_extra);
 
       simulacionAprobada = total >= plazoRecomendado;
-      confirmarBtn.disabled = false;
 
       resultado.innerHTML = `<p>Estás simulando <strong>${total}</strong> días entre plazo y anticipo.</p>`;
 
