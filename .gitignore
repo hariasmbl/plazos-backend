@@ -100,6 +100,11 @@ frontend/404.html
 
 # Scripts que no se usan en producción
 scripts/clasificacion_bl.py
+scripts/buscar_empresas.py
+scripts/pruebas.py
+scripts/run_consulta.py
+scripts/leer_empresas.py
+scripts/carga_archivos.py
 
 # Caches de Python
 __pycache__/
