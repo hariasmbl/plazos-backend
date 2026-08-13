@@ -482,16 +482,6 @@ def test_pagos_keys(rut: str = None):
 # 📂 Subida de archivos
 # ============================================================
 
-@app.post("/subir-docs")
-async def subir_docs(file: UploadFile = File(...)):
-    return await guardar_archivo(file, "list docs")
-
-
-@app.post("/subir-pagos")
-async def subir_pagos(file: UploadFile = File(...)):
-    return await guardar_archivo(file, "cartola")
-
-
 def actualizar_estado_carga(tipo, estado, mensaje=None, tocar_fecha=False):
     campos = {"tipo": tipo, "estado": estado, "mensaje": mensaje}
     if tocar_fecha:
@@ -499,40 +489,56 @@ def actualizar_estado_carga(tipo, estado, mensaje=None, tocar_fecha=False):
     db["metadata"].update_one({"tipo": tipo}, {"$set": campos}, upsert=True)
 
 
-async def guardar_archivo(file: UploadFile, tipo: str):
+def formatear_resumen(resumen):
+    partes = [f"{resumen.get('nuevos', 0)} nuevos"]
+    if "duplicados" in resumen:
+        partes.append(f"{resumen['duplicados']} duplicados")
+    if resumen.get("actualizados"):
+        partes.append(f"{resumen['actualizados']} actualizados")
+    return ", ".join(partes)
+
+
+# ------------------------------------------------------------
+# Las 3 cargas (docs, pagos, empresas) se procesan en segundo
+# plano: dependiendo de la cantidad de filas, insertar en Mongo
+# fila por fila puede tardar minutos, y al ser sincrono dentro
+# de un endpoint async bloqueaba TODO el servidor (un solo
+# worker) mientras procesaba. Con BackgroundTasks la subida del
+# archivo responde de inmediato y el procesamiento corre en un
+# hilo aparte; el frontend consulta /estado-carga por el avance.
+# ------------------------------------------------------------
+
+def procesar_docs_background(ruta, filename):
+    from scripts.cargar_datos import cargar_excel, insertar_documentos
     try:
-        filename = file.filename
-        ruta = os.path.join(UPLOAD_FOLDER, filename)
-
-        with open(ruta, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-
-        if tipo == "list docs":
-            from scripts.cargar_datos import cargar_excel, insertar_documentos
-            df = cargar_excel(ruta)
-            if not df.empty:
-                resumen = insertar_documentos(df, filename)
-                actualizar_estado_carga("docs", "listo", tocar_fecha=True)
-                return {"mensaje": f"Archivo {filename} procesado", "resumen": resumen}
-
-        elif tipo == "cartola":
-            from scripts.cargar_pagos import cargar_y_limpiar_excel, insertar_documentos
-            df = cargar_y_limpiar_excel(ruta)
-            if not df.empty:
-                resumen = insertar_documentos(df, filename)
-                actualizar_estado_carga("pagos", "listo", tocar_fecha=True)
-                return {"mensaje": f"Archivo {filename} procesado", "resumen": resumen}
-
-        return JSONResponse(status_code=400, content={"mensaje": "Archivo sin datos válidos"})
-
+        df = cargar_excel(ruta)
+        if df.empty:
+            actualizar_estado_carga("docs", "error", mensaje="Archivo sin datos válidos")
+            return
+        resumen = insertar_documentos(df, filename)
+        actualizar_estado_carga("docs", "listo", mensaje=formatear_resumen(resumen), tocar_fecha=True)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"mensaje": f"Error al subir archivo: {str(e)}"})
+        actualizar_estado_carga("docs", "error", mensaje=str(e))
+    finally:
+        if os.path.exists(ruta):
+            os.remove(ruta)
 
 
-# ------------------------------------------------------------
-# Empresas: archivo del SII (~1GB), se procesa en segundo plano
-# para no dejar la request colgada ni bloquear otras consultas.
-# ------------------------------------------------------------
+def procesar_pagos_background(ruta, filename):
+    from scripts.cargar_pagos import cargar_y_limpiar_excel, insertar_documentos
+    try:
+        df = cargar_y_limpiar_excel(ruta)
+        if df.empty:
+            actualizar_estado_carga("pagos", "error", mensaje="Archivo sin datos válidos")
+            return
+        resumen = insertar_documentos(df, filename)
+        actualizar_estado_carga("pagos", "listo", mensaje=formatear_resumen(resumen), tocar_fecha=True)
+    except Exception as e:
+        actualizar_estado_carga("pagos", "error", mensaje=str(e))
+    finally:
+        if os.path.exists(ruta):
+            os.remove(ruta)
+
 
 def procesar_empresas_background(ruta):
     from scripts.cargar_empresas import procesar_txt
@@ -546,8 +552,7 @@ def procesar_empresas_background(ruta):
             os.remove(ruta)
 
 
-@app.post("/subir-empresas")
-async def subir_empresas(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+def recibir_archivo(background_tasks, file, tipo, funcion_background, *args_extra):
     try:
         filename = file.filename
         ruta = os.path.join(UPLOAD_FOLDER, filename)
@@ -555,14 +560,29 @@ async def subir_empresas(background_tasks: BackgroundTasks, file: UploadFile = F
         with open(ruta, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        actualizar_estado_carga("empresas", "procesando")
-        background_tasks.add_task(procesar_empresas_background, ruta)
+        actualizar_estado_carga(tipo, "procesando")
+        background_tasks.add_task(funcion_background, ruta, *args_extra)
 
         return {"mensaje": f"Archivo {filename} recibido, procesando en segundo plano."}
 
     except Exception as e:
-        actualizar_estado_carga("empresas", "error", mensaje=str(e))
+        actualizar_estado_carga(tipo, "error", mensaje=str(e))
         return JSONResponse(status_code=500, content={"mensaje": f"Error al subir archivo: {str(e)}"})
+
+
+@app.post("/subir-docs")
+async def subir_docs(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    return recibir_archivo(background_tasks, file, "docs", procesar_docs_background, file.filename)
+
+
+@app.post("/subir-pagos")
+async def subir_pagos(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    return recibir_archivo(background_tasks, file, "pagos", procesar_pagos_background, file.filename)
+
+
+@app.post("/subir-empresas")
+async def subir_empresas(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    return recibir_archivo(background_tasks, file, "empresas", procesar_empresas_background)
 
 
 @app.get("/estado-carga")

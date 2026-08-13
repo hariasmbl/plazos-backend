@@ -33,7 +33,7 @@
         <p class="text-sm text-gray-600 mb-3">Última actualización: <strong id="fechaDocs">Cargando...</strong></p>
         <div class="flex gap-3 items-center">
           <input type="file" id="fileDocs" class="border rounded px-2 py-1 text-sm">
-          <button onclick="subir('fileDocs', '/subir-docs', 'docs', 'msgDocs')" class="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-800 text-sm">Subir documentos</button>
+          <button id="btnDocs" onclick="subir('fileDocs', '/subir-docs', 'docs', 'msgDocs')" class="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-800 text-sm disabled:opacity-50 disabled:cursor-not-allowed">Subir documentos</button>
         </div>
         <p id="msgDocs" class="text-sm mt-2"></p>
       </section>
@@ -43,7 +43,7 @@
         <p class="text-sm text-gray-600 mb-3">Última actualización: <strong id="fechaPagos">Cargando...</strong></p>
         <div class="flex gap-3 items-center">
           <input type="file" id="filePagos" class="border rounded px-2 py-1 text-sm">
-          <button onclick="subir('filePagos', '/subir-pagos', 'pagos', 'msgPagos')" class="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-800 text-sm">Subir pagos</button>
+          <button id="btnPagos" onclick="subir('filePagos', '/subir-pagos', 'pagos', 'msgPagos')" class="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-800 text-sm disabled:opacity-50 disabled:cursor-not-allowed">Subir pagos</button>
         </div>
         <p id="msgPagos" class="text-sm mt-2"></p>
       </section>
@@ -96,24 +96,22 @@
       toast._timeout = setTimeout(() => toast.classList.add("hidden"), 8000);
     }
 
-    function toastResumen(mensaje, resumen) {
-      mostrarToast(`
-        <p class="font-semibold mb-1">${mensaje}</p>
-        <p class="text-sm">🆕 Nuevos: <strong>${resumen.nuevos ?? 0}</strong></p>
-        <p class="text-sm">🔁 Duplicados: <strong>${resumen.duplicados ?? 0}</strong></p>
-        ${resumen.actualizados !== undefined ? `<p class="text-sm">🔄 Actualizados: <strong>${resumen.actualizados}</strong></p>` : ''}
-      `, "success");
-    }
+    const CONFIG = {
+      docs: { fecha: "fechaDocs", msg: "msgDocs", boton: "btnDocs", titulo: "Documentos actualizados" },
+      pagos: { fecha: "fechaPagos", msg: "msgPagos", boton: "btnPagos", titulo: "Pagos actualizados" },
+      empresas: { fecha: "fechaEmpresas", msg: "msgEmpresas", boton: "btnEmpresas", titulo: "Empresas actualizadas" }
+    };
 
-    let pollEmpresas = null;
-    let empresasEnCurso = false;
+    const polls = { docs: null, pagos: null, empresas: null };
+    const enCurso = { docs: false, pagos: false, empresas: false };
 
-    function pintarEmpresas(info) {
+    function pintarEstado(tipo, info) {
       info = info || {};
-      document.getElementById("fechaEmpresas").textContent = formatFecha(info.ultima_actualizacion);
+      const c = CONFIG[tipo];
+      document.getElementById(c.fecha).textContent = formatFecha(info.ultima_actualizacion);
 
-      const msg = document.getElementById("msgEmpresas");
-      const boton = document.getElementById("btnEmpresas");
+      const msg = document.getElementById(c.msg);
+      const boton = document.getElementById(c.boton);
 
       if (info.estado === "procesando") {
         msg.textContent = "Procesando en segundo plano, puede tardar varios minutos...";
@@ -136,40 +134,40 @@
       try {
         const res = await fetch(`${API_BASE}/estado-carga`);
         const data = await res.json();
-        document.getElementById("fechaDocs").textContent = formatFecha(data.docs?.ultima_actualizacion);
-        document.getElementById("fechaPagos").textContent = formatFecha(data.pagos?.ultima_actualizacion);
-        pintarEmpresas(data.empresas);
-
-        if (data.empresas?.estado === "procesando") {
-          iniciarPollingEmpresas();
+        for (const tipo of Object.keys(CONFIG)) {
+          pintarEstado(tipo, data[tipo]);
+          if (data[tipo]?.estado === "procesando") {
+            iniciarPolling(tipo);
+          }
         }
       } catch (e) {
         console.error("No se pudo obtener el estado de carga:", e);
       }
     }
 
-    function iniciarPollingEmpresas() {
-      if (pollEmpresas) return;
-      pollEmpresas = setInterval(async () => {
+    function iniciarPolling(tipo) {
+      if (polls[tipo]) return;
+      polls[tipo] = setInterval(async () => {
         try {
           const res = await fetch(`${API_BASE}/estado-carga`);
           const data = await res.json();
-          pintarEmpresas(data.empresas);
-          if (data.empresas?.estado !== "procesando") {
-            clearInterval(pollEmpresas);
-            pollEmpresas = null;
+          pintarEstado(tipo, data[tipo]);
 
-            if (empresasEnCurso) {
-              empresasEnCurso = false;
-              if (data.empresas?.estado === "listo") {
-                mostrarToast(`<p class="font-semibold">Empresas actualizadas</p><p class="text-sm">${data.empresas.mensaje || ""}</p>`, "success");
-              } else if (data.empresas?.estado === "error") {
-                mostrarToast(`<p class="font-semibold">Error al cargar empresas</p><p class="text-sm">${data.empresas.mensaje || ""}</p>`, "error");
+          if (data[tipo]?.estado !== "procesando") {
+            clearInterval(polls[tipo]);
+            polls[tipo] = null;
+
+            if (enCurso[tipo]) {
+              enCurso[tipo] = false;
+              if (data[tipo]?.estado === "listo") {
+                mostrarToast(`<p class="font-semibold">${CONFIG[tipo].titulo}</p><p class="text-sm">${data[tipo].mensaje || ""}</p>`, "success");
+              } else if (data[tipo]?.estado === "error") {
+                mostrarToast(`<p class="font-semibold">Error al procesar ${tipo}</p><p class="text-sm">${data[tipo].mensaje || ""}</p>`, "error");
               }
             }
           }
         } catch (e) {
-          console.error("Error consultando estado de empresas:", e);
+          console.error(`Error consultando estado de ${tipo}:`, e);
         }
       }, 5000);
     }
@@ -187,9 +185,7 @@
       const formData = new FormData();
       formData.append("file", input.files[0]);
 
-      msg.textContent = tipo === "empresas"
-        ? "Subiendo archivo (puede tardar varios minutos)..."
-        : "Subiendo y procesando...";
+      msg.textContent = "Subiendo archivo...";
       msg.className = "text-sm mt-2 text-gray-600";
 
       try {
@@ -206,19 +202,9 @@
         }
 
         input.value = "";
-
-        if (tipo === "empresas") {
-          msg.textContent = data.mensaje || "Archivo recibido.";
-          empresasEnCurso = true;
-          iniciarPollingEmpresas();
-        } else {
-          msg.textContent = data.mensaje || "Listo.";
-          msg.className = "text-sm mt-2 text-green-700";
-          if (data.resumen) {
-            toastResumen(data.mensaje || "Archivo procesado", data.resumen);
-          }
-          cargarFechas();
-        }
+        msg.textContent = data.mensaje || "Archivo recibido.";
+        enCurso[tipo] = true;
+        iniciarPolling(tipo);
       } catch (e) {
         msg.textContent = "Error al subir el archivo: " + e.message;
         msg.className = "text-sm mt-2 text-red-600";
