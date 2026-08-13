@@ -32,6 +32,7 @@ pagos = db["pagos"]
 empresas_chile = db["empresas"]
 
 UPLOAD_FOLDER = "data"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
 # ============================================================
