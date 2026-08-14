@@ -482,10 +482,17 @@ def test_pagos_keys(rut: str = None):
 # 📂 Subida de archivos
 # ============================================================
 
-def actualizar_estado_carga(tipo, estado, mensaje=None, tocar_fecha=False):
-    campos = {"tipo": tipo, "estado": estado, "mensaje": mensaje}
+def actualizar_estado_carga(tipo, estado, mensaje=None, tocar_fecha=False, **extra):
+    campos = {"tipo": tipo, "estado": estado, "mensaje": mensaje, **extra}
     if tocar_fecha:
         campos["ultima_actualizacion"] = datetime.now()
+
+    if estado in ("listo", "error"):
+        registro = db["metadata"].find_one({"tipo": tipo})
+        inicio = registro.get("inicio") if registro else None
+        if inicio:
+            campos["duracion_segundos"] = (datetime.now() - inicio).total_seconds()
+
     db["metadata"].update_one({"tipo": tipo}, {"$set": campos}, upsert=True)
 
 
@@ -560,7 +567,11 @@ def recibir_archivo(background_tasks, file, tipo, funcion_background, *args_extr
         with open(ruta, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        actualizar_estado_carga(tipo, "procesando")
+        peso_bytes = os.path.getsize(ruta)
+        actualizar_estado_carga(
+            tipo, "procesando",
+            archivo=filename, peso_bytes=peso_bytes, inicio=datetime.now()
+        )
         background_tasks.add_task(funcion_background, ruta, *args_extra)
 
         return {"mensaje": f"Archivo {filename} recibido, procesando en segundo plano."}
@@ -598,6 +609,9 @@ def estado_carga():
             "estado": r.get("estado"),
             "mensaje": r.get("mensaje"),
             "ultima_actualizacion": r.get("ultima_actualizacion"),
+            "archivo": r.get("archivo"),
+            "peso_bytes": r.get("peso_bytes"),
+            "duracion_segundos": r.get("duracion_segundos"),
         }
 
     return {

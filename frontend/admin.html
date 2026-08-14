@@ -30,7 +30,8 @@
 
       <section class="border rounded p-4">
         <h2 class="text-lg font-semibold text-blue-800 mb-1">Documentos (facturas)</h2>
-        <p class="text-sm text-gray-600 mb-3">Última actualización: <strong id="fechaDocs">Cargando...</strong></p>
+        <p class="text-sm text-gray-600">Última actualización: <strong id="fechaDocs">Cargando...</strong></p>
+        <p id="detalleDocs" class="hidden text-xs text-gray-500 mb-3"></p>
         <div class="flex gap-3 items-center">
           <input type="file" id="fileDocs" class="border rounded px-2 py-1 text-sm">
           <button id="btnDocs" onclick="subir('fileDocs', '/subir-docs', 'docs', 'msgDocs')" class="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-800 text-sm disabled:opacity-50 disabled:cursor-not-allowed">Subir documentos</button>
@@ -40,7 +41,8 @@
 
       <section class="border rounded p-4">
         <h2 class="text-lg font-semibold text-blue-800 mb-1">Pagos (cartola)</h2>
-        <p class="text-sm text-gray-600 mb-3">Última actualización: <strong id="fechaPagos">Cargando...</strong></p>
+        <p class="text-sm text-gray-600">Última actualización: <strong id="fechaPagos">Cargando...</strong></p>
+        <p id="detallePagos" class="hidden text-xs text-gray-500 mb-3"></p>
         <div class="flex gap-3 items-center">
           <input type="file" id="filePagos" class="border rounded px-2 py-1 text-sm">
           <button id="btnPagos" onclick="subir('filePagos', '/subir-pagos', 'pagos', 'msgPagos')" class="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-800 text-sm disabled:opacity-50 disabled:cursor-not-allowed">Subir pagos</button>
@@ -53,7 +55,8 @@
         <p class="text-sm text-yellow-800 mb-3">
           ⚠️ Esto <strong>reemplaza por completo</strong> la base de empresas actual. El archivo del SII es grande (~1 GB) y puede tardar varios minutos en subir y procesarse.
         </p>
-        <p class="text-sm text-gray-600 mb-3">Última actualización: <strong id="fechaEmpresas">Cargando...</strong></p>
+        <p class="text-sm text-gray-600">Última actualización: <strong id="fechaEmpresas">Cargando...</strong></p>
+        <p id="detalleEmpresas" class="hidden text-xs text-gray-500 mb-3"></p>
         <div class="flex gap-3 items-center">
           <input type="file" id="fileEmpresas" class="border rounded px-2 py-1 text-sm">
           <button id="btnEmpresas" onclick="subir('fileEmpresas', '/subir-empresas', 'empresas', 'msgEmpresas')" class="bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">Subir empresas</button>
@@ -82,6 +85,19 @@
       return `${d}-${m}-${y} ${hh}:${mm}`;
     }
 
+    function formatPeso(bytes) {
+      if (!bytes) return null;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    function formatDuracion(segundos) {
+      if (segundos === undefined || segundos === null) return null;
+      const mins = Math.floor(segundos / 60);
+      const secs = Math.round(segundos % 60);
+      return mins > 0 ? `${mins} min ${secs}s` : `${secs}s`;
+    }
+
     function mostrarToast(html, tipo = "success") {
       const toast = document.getElementById("toast");
       const colores = {
@@ -97,9 +113,9 @@
     }
 
     const CONFIG = {
-      docs: { fecha: "fechaDocs", msg: "msgDocs", boton: "btnDocs", titulo: "Documentos actualizados" },
-      pagos: { fecha: "fechaPagos", msg: "msgPagos", boton: "btnPagos", titulo: "Pagos actualizados" },
-      empresas: { fecha: "fechaEmpresas", msg: "msgEmpresas", boton: "btnEmpresas", titulo: "Empresas actualizadas" }
+      docs: { fecha: "fechaDocs", detalle: "detalleDocs", msg: "msgDocs", boton: "btnDocs", titulo: "Documentos actualizados" },
+      pagos: { fecha: "fechaPagos", detalle: "detallePagos", msg: "msgPagos", boton: "btnPagos", titulo: "Pagos actualizados" },
+      empresas: { fecha: "fechaEmpresas", detalle: "detalleEmpresas", msg: "msgEmpresas", boton: "btnEmpresas", titulo: "Empresas actualizadas" }
     };
 
     const polls = { docs: null, pagos: null, empresas: null };
@@ -109,6 +125,18 @@
       info = info || {};
       const c = CONFIG[tipo];
       document.getElementById(c.fecha).textContent = formatFecha(info.ultima_actualizacion);
+
+      const detalleEl = document.getElementById(c.detalle);
+      const peso = formatPeso(info.peso_bytes);
+      const duracion = formatDuracion(info.duracion_segundos);
+      if (info.archivo && (peso || duracion)) {
+        detalleEl.textContent = `Último archivo: ${info.archivo}` +
+          (peso ? ` (${peso})` : '') +
+          (duracion ? ` — tardó ${duracion}` : '');
+        detalleEl.classList.remove("hidden");
+      } else {
+        detalleEl.classList.add("hidden");
+      }
 
       const msg = document.getElementById(c.msg);
       const boton = document.getElementById(c.boton);
