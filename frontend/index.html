@@ -32,18 +32,55 @@
         <button id="logoutBtn" class="bg-gray-300 px-3 py-1 text-sm rounded hover:bg-gray-400">Cerrar sesión</button>
       </div>
 
-      <form id="consultaForm" class="flex gap-4 mb-6">
-        <input type="text" id="rut" placeholder="Ingrese RUT del deudor (Ejemplo: 12345678-9)" required class="border rounded px-4 py-2 flex-1">
-        <button type="submit" class="bg-blue-700 text-white px-6 py-2 rounded hover:bg-blue-800">Consultar</button>
-      </form>
+      <div class="flex gap-2 mb-6 border-b">
+        <button id="modoIndividualBtn" onclick="cambiarModo('individual')" class="px-4 py-2 text-sm font-medium border-b-2 border-blue-700 text-blue-700">Consulta individual</button>
+        <button id="modoMultipleBtn" onclick="cambiarModo('multiple')" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700">Consulta múltiple</button>
+      </div>
 
-      <!-- input oculto para factorDias (CAMBIO #1) -->
-      <input type="hidden" id="factorDias" value="15">
+      <div id="seccionIndividual">
+        <form id="consultaForm" class="flex gap-4 mb-6">
+          <input type="text" id="rut" placeholder="Ingrese RUT del deudor (Ejemplo: 12345678-9)" required class="border rounded px-4 py-2 flex-1">
+          <button type="submit" class="bg-blue-700 text-white px-6 py-2 rounded hover:bg-blue-800">Consultar</button>
+        </form>
 
-      <div id="resultados" class="space-y-6"></div>
+        <!-- input oculto para factorDias (CAMBIO #1) -->
+        <input type="hidden" id="factorDias" value="15">
 
-      <div class="mt-4">
-        <button onclick="limpiarResultados()" class="text-sm text-gray-600 underline hover:text-gray-800">Limpiar resultados</button>
+        <div id="resultados" class="space-y-6"></div>
+
+        <div class="mt-4">
+          <button onclick="limpiarResultados()" class="text-sm text-gray-600 underline hover:text-gray-800">Limpiar resultados</button>
+        </div>
+      </div>
+
+      <div id="seccionMultiple" class="hidden">
+        <div class="mb-4 flex gap-4">
+          <label class="inline-flex items-center">
+            <input type="radio" name="fuenteRuts" value="pegar" checked onchange="cambiarFuenteRuts('pegar')">
+            <span class="ml-1 text-sm">Pegar lista de RUTs</span>
+          </label>
+          <label class="inline-flex items-center">
+            <input type="radio" name="fuenteRuts" value="archivo" onchange="cambiarFuenteRuts('archivo')">
+            <span class="ml-1 text-sm">Subir Excel/CSV</span>
+          </label>
+        </div>
+
+        <div id="pegarRutsSection">
+          <textarea id="rutsTextarea" rows="4" placeholder="Ingresa los RUTs separados por coma o salto de línea (máx. 50)" class="border rounded px-3 py-2 w-full"></textarea>
+        </div>
+
+        <div id="archivoRutsSection" class="hidden">
+          <input type="file" id="archivoRuts" accept=".xlsx,.xls,.csv" class="border rounded px-2 py-1 text-sm">
+          <p class="text-xs text-gray-500 mt-1">Se busca una columna llamada "RUT"; si no existe, se usa la primera columna del archivo.</p>
+        </div>
+
+        <div class="mt-4">
+          <button onclick="consultarBatch()" class="bg-blue-700 text-white px-6 py-2 rounded hover:bg-blue-800">Consultar</button>
+        </div>
+
+        <p id="msgBatch" class="text-sm mt-2"></p>
+
+        <div id="resultadosBatch" class="mt-6"></div>
       </div>
     </div>
   </main>
@@ -366,6 +403,186 @@
 
     function limpiarResultados() {
       document.getElementById("resultados").innerHTML = "";
+    }
+
+    // ==========================================================
+    // CONSULTA MÚLTIPLE (batch)
+    // ==========================================================
+    const LIMITE_BATCH_RUTS = 50;
+    let ultimosResultadosBatch = [];
+
+    function cambiarModo(modo) {
+      const activo = "border-blue-700 text-blue-700";
+      const inactivo = "border-transparent text-gray-500 hover:text-gray-700";
+
+      document.getElementById('seccionIndividual').classList.toggle('hidden', modo !== 'individual');
+      document.getElementById('seccionMultiple').classList.toggle('hidden', modo !== 'multiple');
+
+      const btnIndividual = document.getElementById('modoIndividualBtn');
+      const btnMultiple = document.getElementById('modoMultipleBtn');
+      btnIndividual.className = `px-4 py-2 text-sm font-medium border-b-2 ${modo === 'individual' ? activo : inactivo}`;
+      btnMultiple.className = `px-4 py-2 text-sm font-medium border-b-2 ${modo === 'multiple' ? activo : inactivo}`;
+    }
+
+    function cambiarFuenteRuts(fuente) {
+      document.getElementById('pegarRutsSection').classList.toggle('hidden', fuente !== 'pegar');
+      document.getElementById('archivoRutsSection').classList.toggle('hidden', fuente !== 'archivo');
+    }
+
+    async function obtenerListaRuts() {
+      const fuente = document.querySelector('input[name="fuenteRuts"]:checked').value;
+
+      if (fuente === 'pegar') {
+        const texto = document.getElementById('rutsTextarea').value;
+        return texto.split(/[\n,]+/).map(r => r.trim()).filter(Boolean);
+      }
+
+      const input = document.getElementById('archivoRuts');
+      if (!input.files.length) {
+        throw new Error("Selecciona un archivo primero.");
+      }
+
+      const formData = new FormData();
+      formData.append("file", input.files[0]);
+
+      const res = await fetch("https://plazos-backend.onrender.com/extraer-ruts", {
+        method: "POST",
+        body: formData
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudo leer el archivo.");
+      }
+
+      return data.ruts;
+    }
+
+    async function consultarBatch() {
+      const msg = document.getElementById('msgBatch');
+      document.getElementById('resultadosBatch').innerHTML = "";
+      msg.textContent = "";
+
+      let listaRuts;
+      try {
+        listaRuts = await obtenerListaRuts();
+      } catch (e) {
+        msg.textContent = e.message;
+        msg.className = "text-sm mt-2 text-red-600";
+        return;
+      }
+
+      const ruts = [...new Set(listaRuts.map(normalizarRut).filter(Boolean))];
+
+      if (ruts.length === 0) {
+        msg.textContent = "No se encontraron RUTs válidos.";
+        msg.className = "text-sm mt-2 text-red-600";
+        return;
+      }
+
+      if (ruts.length > LIMITE_BATCH_RUTS) {
+        msg.textContent = `Máximo ${LIMITE_BATCH_RUTS} RUTs por consulta (tienes ${ruts.length}).`;
+        msg.className = "text-sm mt-2 text-red-600";
+        return;
+      }
+
+      msg.textContent = `Consultando ${ruts.length} RUT(s)...`;
+      msg.className = "text-sm mt-2 text-gray-600";
+
+      try {
+        const res = await fetch("https://plazos-backend.onrender.com/consultar-ruts-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ruts })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          msg.textContent = data.error || "Error al consultar.";
+          msg.className = "text-sm mt-2 text-red-600";
+          return;
+        }
+
+        ultimosResultadosBatch = data.resultados;
+        msg.textContent = `${data.resultados.length} resultado(s).`;
+        msg.className = "text-sm mt-2 text-green-700";
+        mostrarTablaBatch(data.resultados);
+      } catch (e) {
+        msg.textContent = "Error al consultar: " + e.message;
+        msg.className = "text-sm mt-2 text-red-600";
+      }
+    }
+
+    function mostrarTablaBatch(resultados) {
+      const contenedor = document.getElementById('resultadosBatch');
+
+      const filas = resultados.map(r => {
+        if (r.error) {
+          return `
+            <tr class="border-t">
+              <td class="px-3 py-2">${r.rut}</td>
+              <td class="px-3 py-2 text-red-600" colspan="6">${r.error}</td>
+            </tr>`;
+        }
+        return `
+          <tr class="border-t">
+            <td class="px-3 py-2">${r.rut}</td>
+            <td class="px-3 py-2">${r.nombre_deudor || 'N/A'}</td>
+            <td class="px-3 py-2 text-center">${r.tipo_entidad || 'N/A'}</td>
+            <td class="px-3 py-2 text-center">${r.plazo_recomendado ?? 'N/A'}</td>
+            <td class="px-3 py-2 text-center">${r.promedio_historico !== undefined && r.promedio_historico !== null ? r.promedio_historico.toFixed(1) : 'N/A'}</td>
+            <td class="px-3 py-2 text-center">${r.cantidad_historico ?? 0}</td>
+            <td class="px-3 py-2 text-center">${r.riesgo_detectado ? '⚠️ Sí' : 'No'}</td>
+          </tr>`;
+      }).join('');
+
+      contenedor.innerHTML = `
+        <div class="flex justify-end gap-2 mb-2">
+          <button onclick="descargarCSVBatch()" class="text-sm bg-gray-200 px-3 py-1 rounded hover:bg-gray-300">Descargar CSV</button>
+          <button onclick="window.print()" class="text-sm bg-gray-200 px-3 py-1 rounded hover:bg-gray-300">Imprimir</button>
+        </div>
+        <table class="w-full border text-sm">
+          <thead class="bg-gray-100">
+            <tr>
+              <th class="px-3 py-2 text-left">RUT</th>
+              <th class="px-3 py-2 text-left">Deudor</th>
+              <th class="px-3 py-2">Tipo</th>
+              <th class="px-3 py-2">Plazo recomendado</th>
+              <th class="px-3 py-2">Promedio histórico</th>
+              <th class="px-3 py-2">Cant. histórico</th>
+              <th class="px-3 py-2">¿Riesgo?</th>
+            </tr>
+          </thead>
+          <tbody>${filas}</tbody>
+        </table>`;
+    }
+
+    function descargarCSVBatch() {
+      const encabezado = ["RUT", "Deudor", "Tipo", "Plazo recomendado", "Promedio historico", "Cantidad historico", "Riesgo", "Error"];
+      const filas = ultimosResultadosBatch.map(r => [
+        r.rut,
+        r.error ? "" : (r.nombre_deudor || ""),
+        r.error ? "" : (r.tipo_entidad || ""),
+        r.error ? "" : (r.plazo_recomendado ?? ""),
+        r.error ? "" : (r.promedio_historico ?? ""),
+        r.error ? "" : (r.cantidad_historico ?? ""),
+        r.error ? "" : (r.riesgo_detectado ? "Si" : "No"),
+        r.error || ""
+      ]);
+
+      const csv = [encabezado, ...filas]
+        .map(fila => fila.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","))
+        .join("\n");
+
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `consulta_ruts_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     }
   </script>
   

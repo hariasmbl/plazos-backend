@@ -4,9 +4,12 @@ from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from datetime import datetime
+from collections import defaultdict
+from pydantic import BaseModel
 import numpy as np
 import os
 import shutil
+import io
 
 from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad, normalizar_clave
 
@@ -83,16 +86,14 @@ def es_outlier(valor, promedio, desviacion):
     return abs(z) > 2.0
 
 
-def cruzar_facturas_pagos(rut):
+def _cruzar(facturas, pagos_deudor, rut=None):
     """
-    Cruza facturas y pagos de un RUT deudor.
-    Devuelve (facturas, pagos_dict, registros_validos, registros_limpios, promedio, desviacion),
-    donde registros_validos excluye plazos anómalos (<0 o >300 días) y
-    registros_limpios además excluye outliers (z-score > 2 sobre registros_validos).
+    Núcleo puro del cruce factura-pago: recibe las listas ya obtenidas de
+    Mongo (para poder reusarlo tanto con una query por RUT como con un
+    batch de varios RUTs pre-cargados con $in) y hace todo el cálculo en
+    memoria. Devuelve (pagos_dict, registros_validos, registros_limpios,
+    promedio, desviacion) — mismo criterio de filtrado que antes.
     """
-    facturas = list(docs.find({"RUT DEUDOR": rut}))
-    pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
-
     pagos_dict = {}
     for p in pagos_deudor:
         clave = normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope."))
@@ -143,7 +144,7 @@ def cruzar_facturas_pagos(rut):
                 })
 
     if not registros_validos:
-        return facturas, pagos_dict, [], [], None, None
+        return pagos_dict, [], [], None, None
 
     plazos = [r["plazo"] for r in registros_validos]
     promedio = np.mean(plazos)
@@ -154,6 +155,19 @@ def cruzar_facturas_pagos(rut):
         if not es_outlier(r["plazo"], promedio, desviacion)
     ]
 
+    return pagos_dict, registros_validos, registros_limpios, promedio, desviacion
+
+
+def cruzar_facturas_pagos(rut):
+    """
+    Cruza facturas y pagos de un RUT deudor (consulta individual).
+    Devuelve (facturas, pagos_dict, registros_validos, registros_limpios, promedio, desviacion),
+    donde registros_validos excluye plazos anómalos (<0 o >300 días) y
+    registros_limpios además excluye outliers (z-score > 2 sobre registros_validos).
+    """
+    facturas = list(docs.find({"RUT DEUDOR": rut}))
+    pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
+    pagos_dict, registros_validos, registros_limpios, promedio, desviacion = _cruzar(facturas, pagos_deudor, rut)
     return facturas, pagos_dict, registros_validos, registros_limpios, promedio, desviacion
 
 
@@ -189,10 +203,15 @@ def debug_format(rut: str):
 # 🔍 CONSULTAR RUT
 # ============================================================
 
-@app.get("/consultar-rut")
-def consultar_por_rut(rut: str = Query(..., alias="rut")):
-
-    facturas, pagos_dict, registros_validos, registros_limpios, promedio, desviacion = cruzar_facturas_pagos(rut)
+def procesar_rut(rut, facturas, pagos_deudor, morosos):
+    """
+    Misma lógica de negocio que antes tenía consultar_por_rut(), pero
+    recibiendo facturas/pagos/morosos ya obtenidos de Mongo en vez de
+    consultarlos ella misma — así /consultar-rut (una query) y
+    /consultar-ruts-batch (una query $in para todos los RUTs) pueden
+    compartir exactamente la misma función.
+    """
+    pagos_dict, registros_validos, registros_limpios, promedio, desviacion = _cruzar(facturas, pagos_deudor, rut)
 
     if registros_validos:
 
@@ -232,7 +251,6 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
             plazo_recomendado = plazo_regla
 
         morosos_data = []
-        morosos = list(docs.find({"RUT DEUDOR": rut, "ESTADO": "MOROSO"}))
 
         claves_pagadas = set(
             normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
@@ -383,6 +401,104 @@ def consultar_por_rut(rut: str = Query(..., alias="rut")):
         "morosos": [],
         "empresas_similares": True
     }
+
+
+@app.get("/consultar-rut")
+def consultar_por_rut(rut: str = Query(..., alias="rut")):
+    facturas = list(docs.find({"RUT DEUDOR": rut}))
+    pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
+    morosos = list(docs.find({"RUT DEUDOR": rut, "ESTADO": "MOROSO"}))
+    return procesar_rut(rut, facturas, pagos_deudor, morosos)
+
+
+# ============================================================
+# 🔍 CONSULTAR MÚLTIPLES RUT (batch)
+# ============================================================
+
+LIMITE_BATCH_RUTS = 50
+
+
+class RutsBatchRequest(BaseModel):
+    ruts: list[str]
+
+
+@app.post("/consultar-ruts-batch")
+def consultar_ruts_batch(payload: RutsBatchRequest):
+    # Dedup preservando el orden de entrada
+    ruts = list(dict.fromkeys(r.strip() for r in payload.ruts if r and r.strip()))
+
+    if not ruts:
+        return JSONResponse(status_code=400, content={"error": "Debe incluir al menos un RUT."})
+
+    if len(ruts) > LIMITE_BATCH_RUTS:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Máximo {LIMITE_BATCH_RUTS} RUTs por consulta (se recibieron {len(ruts)})."}
+        )
+
+    # Una sola query $in para todos los RUTs en vez de una por RUT
+    facturas_por_rut = defaultdict(list)
+    for d in docs.find({"RUT DEUDOR": {"$in": ruts}}):
+        facturas_por_rut[d.get("RUT DEUDOR")].append(d)
+
+    pagos_por_rut = defaultdict(list)
+    for p in pagos.find({"Rut Deudor": {"$in": ruts}}):
+        pagos_por_rut[p.get("Rut Deudor")].append(p)
+
+    morosos_por_rut = defaultdict(list)
+    for m in docs.find({"RUT DEUDOR": {"$in": ruts}, "ESTADO": "MOROSO"}):
+        morosos_por_rut[m.get("RUT DEUDOR")].append(m)
+
+    resultados = []
+    for rut in ruts:
+        try:
+            resultado = procesar_rut(
+                rut,
+                facturas_por_rut.get(rut, []),
+                pagos_por_rut.get(rut, []),
+                morosos_por_rut.get(rut, [])
+            )
+        except Exception as e:
+            resultado = {"error": f"Error al procesar RUT: {str(e)}"}
+
+        resultado["rut"] = rut
+        resultados.append(resultado)
+
+    return {"resultados": resultados}
+
+
+@app.post("/extraer-ruts")
+async def extraer_ruts(file: UploadFile = File(...)):
+    """
+    Lee un Excel/CSV subido y devuelve la lista de RUTs de la columna
+    "RUT" (sin importar mayúsculas/minúsculas); si no encuentra esa
+    columna, usa la primera. Solo extrae texto, no toca la base de datos.
+    """
+    import pandas as pd
+
+    try:
+        contenido = await file.read()
+        nombre = (file.filename or "").lower()
+
+        if nombre.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(contenido))
+        else:
+            df = pd.read_excel(io.BytesIO(contenido))
+
+        if df.empty or len(df.columns) == 0:
+            return JSONResponse(status_code=400, content={"error": "El archivo no tiene columnas legibles."})
+
+        columna_rut = next(
+            (col for col in df.columns if str(col).strip().upper() == "RUT"),
+            df.columns[0]
+        )
+
+        ruts = [str(v).strip() for v in df[columna_rut].dropna().tolist() if str(v).strip()]
+
+        return {"ruts": ruts, "columna_usada": str(columna_rut)}
+
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": f"No se pudo leer el archivo: {str(e)}"})
 
 
 # ============================================================
