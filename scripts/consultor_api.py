@@ -481,10 +481,20 @@ def procesar_rut(rut, facturas, pagos_deudor, morosos):
 
 @app.get("/consultar-rut")
 def consultar_por_rut(rut: str = Query(..., alias="rut")):
-    facturas = list(docs.find({"RUT DEUDOR": rut}))
-    pagos_deudor = list(pagos.find({"Rut Deudor": rut}))
-    morosos = list(docs.find({"RUT DEUDOR": rut, "ESTADO": "MOROSO"}))
-    return procesar_rut(rut, facturas, pagos_deudor, morosos)
+    rut_final, estado = normalizar_y_completar_rut(rut)
+
+    if estado == "invalido":
+        return {"error": "RUT inválido — verifica el formato (ej: 12345678-9)."}
+
+    if estado == "dv_sospechoso":
+        return {"error": "DV inválido — revisa el RUT.", "dv_sospechoso": True, "rut": rut_final}
+
+    facturas = list(docs.find({"RUT DEUDOR": rut_final}))
+    pagos_deudor = list(pagos.find({"Rut Deudor": rut_final}))
+    morosos = list(docs.find({"RUT DEUDOR": rut_final, "ESTADO": "MOROSO"}))
+    resultado = procesar_rut(rut_final, facturas, pagos_deudor, morosos)
+    resultado["rut"] = rut_final
+    return resultado
 
 
 # ============================================================
