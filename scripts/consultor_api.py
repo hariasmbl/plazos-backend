@@ -679,27 +679,35 @@ async def extraer_ruts(file: UploadFile = File(...)):
                 if not (hay_header and NOMBRES_NO_RUT.search(str(col)))
             ]
 
-            mejor_col, mejor_score, segundo_score = None, 0.0, 0.0
+            UMBRAL_SCORE_RUT = 0.7
+            MARGEN_EMPATE = 0.2
+            orden_columnas = list(df.columns)
+
+            scores = {}
             for col in columnas_candidatas:
                 valores = [v for v in df[col].tolist() if str(v).strip() and str(v).strip().lower() != "nan"]
                 if not valores:
                     continue
-                score = sum(1 for v in valores if parece_rut(v)) / len(valores)
-                if score > mejor_score:
-                    mejor_col, segundo_score, mejor_score = col, mejor_score, score
-                elif score > segundo_score:
-                    segundo_score = score
+                scores[col] = sum(1 for v in valores if parece_rut(v)) / len(valores)
 
-            # Exigimos que la columna ganadora sea claramente RUT (>=70% de
-            # sus valores matchean) y que no haya otra columna casi tan
-            # parecida (para no adivinar entre dos candidatas ambiguas).
-            if mejor_col is None or mejor_score < 0.7 or (mejor_score - segundo_score) < 0.2:
+            candidatos_validos = [col for col, s in scores.items() if s >= UMBRAL_SCORE_RUT]
+
+            # Si ninguna columna alcanza el umbral, seguimos sin adivinar.
+            if not candidatos_validos:
                 return JSONResponse(status_code=400, content={
                     "error": "No se pudo identificar con confianza la columna de RUTs. "
                              "Verifica que el archivo tenga una columna llamada \"RUT\", o que los "
                              "RUTs sean claramente reconocibles (sin mezclarse con otros números)."
                 })
-            columna_rut = mejor_col
+
+            # Entre las candidatas que sí alcanzan el umbral, si varias
+            # empatan (dentro del margen respecto a la mejor), preferimos la
+            # más a la izquierda: los archivos que suben los usuarios
+            # siempre traen el RUT como primera columna, así que la
+            # posición es una señal confiable para desempatar.
+            mejor_score = max(scores[col] for col in candidatos_validos)
+            empatadas = [col for col in candidatos_validos if scores[col] >= mejor_score - MARGEN_EMPATE]
+            columna_rut = min(empatadas, key=lambda col: orden_columnas.index(col))
 
         valores_originales = [str(v).strip() for v in df[columna_rut].tolist() if str(v).strip() and str(v).strip().lower() != "nan"]
 
