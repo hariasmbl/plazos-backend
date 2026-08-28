@@ -10,6 +10,37 @@
       return rut.replace(/\./g, "").replace(/\s+/g, "").replace(/-k$/i, "-K").toUpperCase();
     }
   </script>
+
+  <!-- La tabla de consulta múltiple vive en un contenedor overflow-x-auto
+       (necesario en pantalla para no romper el layout con 11 columnas).
+       Al imprimir, overflow-x recorta lo que no cabe en vez de paginarlo,
+       así que acá lo anulamos y compensamos con menos tamaño de fuente y
+       evitando que una fila se parta entre páginas. Todo esto queda
+       scopeado a #resultadosBatch, así que no afecta a la consulta
+       individual (esa sección queda vacía cuando no se ha consultado en
+       modo batch, por lo que estas reglas simplemente no matchean nada).
+
+       La orientación horizontal NO va acá: @page es una regla de nivel de
+       documento que no se puede condicionar con un selector de clase, así
+       que se inyecta/quita dinámicamente por JS solo al imprimir desde el
+       botón de la tabla batch (ver imprimirBatch()) para no afectar el
+       flujo de impresión de la consulta individual. -->
+  <style media="print">
+    #resultadosBatch .overflow-x-auto {
+      overflow: visible !important;
+    }
+
+    #resultadosBatch table {
+      font-size: 9px;
+    }
+
+    #resultadosBatch tr,
+    #resultadosBatch td,
+    #resultadosBatch th {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+  </style>
 </head>
 
 <body class="bg-white text-gray-800 font-sans">
@@ -570,7 +601,7 @@
       contenedor.innerHTML = `
         <div class="flex justify-between items-center mb-2">
           <p id="progresoConfirmacion" class="text-sm text-gray-600"></p>
-          <button id="imprimirBatchBtn" onclick="window.print()" class="hidden text-sm bg-gray-200 px-3 py-1 rounded hover:bg-gray-300">Imprimir</button>
+          <button id="imprimirBatchBtn" onclick="imprimirBatch()" class="hidden text-sm bg-gray-200 px-3 py-1 rounded hover:bg-gray-300">Imprimir</button>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full border text-sm">
@@ -654,6 +685,29 @@
 
       confirmadosBatch.add(i);
       actualizarProgresoBatch();
+    }
+
+    // La orientación horizontal solo debe sugerirse al imprimir la tabla
+    // de consulta múltiple, no la consulta individual (que usa
+    // window.print() directo más abajo). @page no se puede condicionar
+    // con una clase, así que se inyecta una hoja de estilo temporal justo
+    // antes de imprimir y se retira después (evento afterprint).
+    function imprimirBatch() {
+      document.body.classList.add('print-landscape');
+
+      const estilo = document.createElement('style');
+      estilo.id = 'estilo-print-landscape';
+      estilo.textContent = '@page { size: landscape; }';
+      document.head.appendChild(estilo);
+
+      const limpiar = () => {
+        estilo.remove();
+        document.body.classList.remove('print-landscape');
+        window.removeEventListener('afterprint', limpiar);
+      };
+      window.addEventListener('afterprint', limpiar);
+
+      window.print();
     }
   </script>
   
