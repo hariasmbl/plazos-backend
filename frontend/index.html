@@ -516,23 +516,40 @@
     function mostrarTablaBatch(resultados) {
       const contenedor = document.getElementById('resultadosBatch');
 
-      const filas = resultados.map(r => {
+      const filas = resultados.map((r, i) => {
         if (r.error) {
           return `
             <tr class="border-t">
               <td class="px-3 py-2">${r.rut}</td>
-              <td class="px-3 py-2 text-red-600" colspan="6">${r.error}</td>
+              <td class="px-3 py-2 text-red-600" colspan="10">${r.error}</td>
             </tr>`;
         }
+
+        // Igual que en la consulta individual: si ya hay riesgo detectado
+        // (o la recomendación lo menciona), no se ofrece simular.
+        const sinRiesgo = !r.riesgo_detectado && !(r.recomendacion || '').toLowerCase().includes('riesgo');
+
+        const celdaSimulacion = sinRiesgo ? `
+            <td class="px-2 py-2 text-center"><input type="number" id="plazoB_${i}" class="border px-2 py-1 w-20 text-sm" min="1"></td>
+            <td class="px-2 py-2 text-center"><input type="number" id="anticipoB_${i}" class="border px-2 py-1 w-20 text-sm" min="0" max="100"></td>
+            <td class="px-2 py-2 text-center">
+              <button onclick="simularBatch(${i}, ${r.plazo_recomendado}, ${r.factor_dias || 15})" class="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600 text-xs">Simular</button>
+            </td>
+            <td class="px-2 py-2 text-sm" id="resultadoB_${i}"></td>
+            <td class="px-2 py-2 text-center">
+              <button id="confirmarB_${i}" onclick="confirmarSimulacionBatch(${i})" class="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 text-xs disabled:opacity-50 disabled:cursor-not-allowed" disabled>Confirmar</button>
+            </td>`
+          : `<td class="px-2 py-2 text-sm text-yellow-700" colspan="5">Revisar con Riesgo</td>`;
+
         return `
           <tr class="border-t">
             <td class="px-3 py-2">${r.rut}</td>
             <td class="px-3 py-2">${r.nombre_deudor || 'N/A'}</td>
-            <td class="px-3 py-2 text-center">${r.tipo_entidad || 'N/A'}</td>
             <td class="px-3 py-2 text-center">${r.plazo_recomendado ?? 'N/A'}</td>
             <td class="px-3 py-2 text-center">${r.promedio_historico !== undefined && r.promedio_historico !== null ? r.promedio_historico.toFixed(1) : 'N/A'}</td>
             <td class="px-3 py-2 text-center">${r.cantidad_historico ?? 0}</td>
             <td class="px-3 py-2 text-center">${r.riesgo_detectado ? '⚠️ Sí' : 'No'}</td>
+            ${celdaSimulacion}
           </tr>`;
       }).join('');
 
@@ -541,28 +558,72 @@
           <button onclick="descargarCSVBatch()" class="text-sm bg-gray-200 px-3 py-1 rounded hover:bg-gray-300">Descargar CSV</button>
           <button onclick="window.print()" class="text-sm bg-gray-200 px-3 py-1 rounded hover:bg-gray-300">Imprimir</button>
         </div>
-        <table class="w-full border text-sm">
-          <thead class="bg-gray-100">
-            <tr>
-              <th class="px-3 py-2 text-left">RUT</th>
-              <th class="px-3 py-2 text-left">Deudor</th>
-              <th class="px-3 py-2">Tipo</th>
-              <th class="px-3 py-2">Plazo recomendado</th>
-              <th class="px-3 py-2">Promedio histórico</th>
-              <th class="px-3 py-2">Cant. histórico</th>
-              <th class="px-3 py-2">¿Riesgo?</th>
-            </tr>
-          </thead>
-          <tbody>${filas}</tbody>
-        </table>`;
+        <div class="overflow-x-auto">
+          <table class="w-full border text-sm">
+            <thead class="bg-gray-100">
+              <tr>
+                <th class="px-3 py-2 text-left">RUT</th>
+                <th class="px-3 py-2 text-left">Deudor</th>
+                <th class="px-3 py-2">Plazo recomendado</th>
+                <th class="px-3 py-2">Promedio histórico</th>
+                <th class="px-3 py-2">Cant. histórico</th>
+                <th class="px-3 py-2" title="Hay documentos morosos vencidos más allá del plazo recomendado">¿Riesgo?</th>
+                <th class="px-2 py-2">Plazo (días)</th>
+                <th class="px-2 py-2">% Anticipo</th>
+                <th class="px-2 py-2">Simular</th>
+                <th class="px-2 py-2">Resultado</th>
+                <th class="px-2 py-2">Confirmar</th>
+              </tr>
+            </thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </div>`;
+    }
+
+    function simularBatch(i, plazoRecomendado, factorDias) {
+      const plazo = parseInt(document.getElementById(`plazoB_${i}`).value);
+      const anticipo = parseFloat(document.getElementById(`anticipoB_${i}`).value);
+      const resultado = document.getElementById(`resultadoB_${i}`);
+      const confirmarBtn = document.getElementById(`confirmarB_${i}`);
+
+      if (isNaN(plazo) || isNaN(anticipo)) {
+        alert("Por favor ingrese valores válidos para plazo y anticipo.");
+        return;
+      }
+
+      confirmarBtn.disabled = false;
+
+      if (plazo < PLAZO_MIN_DIAS) {
+        resultado.innerHTML = `<span class="text-yellow-700">⚠️ Menor a ${PLAZO_MIN_DIAS} días: revisar con Riesgo.</span>`;
+        return;
+      }
+
+      if (plazo > PLAZO_MAX_DIAS) {
+        resultado.innerHTML = `<span class="text-yellow-700">⚠️ Mayor a ${PLAZO_MAX_DIAS} días: revisar con Riesgo.</span>`;
+        return;
+      }
+
+      const puntos_anticipo = 100 - anticipo;
+      const dias_extra = puntos_anticipo * factorDias;
+      const total = Math.floor(plazo + dias_extra);
+      const aprobado = total >= plazoRecomendado;
+
+      resultado.innerHTML = aprobado
+        ? `<span class="text-green-700">✅ ${total} días — Aprobado</span>`
+        : `<span class="text-red-600">⚠️ ${total} días — Rechazado</span>`;
+    }
+
+    function confirmarSimulacionBatch(i) {
+      document.getElementById(`plazoB_${i}`).disabled = true;
+      document.getElementById(`anticipoB_${i}`).disabled = true;
+      document.getElementById(`confirmarB_${i}`).disabled = true;
     }
 
     function descargarCSVBatch() {
-      const encabezado = ["RUT", "Deudor", "Tipo", "Plazo recomendado", "Promedio historico", "Cantidad historico", "Riesgo", "Error"];
+      const encabezado = ["RUT", "Deudor", "Plazo recomendado", "Promedio historico", "Cantidad historico", "Riesgo", "Error"];
       const filas = ultimosResultadosBatch.map(r => [
         r.rut,
         r.error ? "" : (r.nombre_deudor || ""),
-        r.error ? "" : (r.tipo_entidad || ""),
         r.error ? "" : (r.plazo_recomendado ?? ""),
         r.error ? "" : (r.promedio_historico ?? ""),
         r.error ? "" : (r.cantidad_historico ?? ""),
