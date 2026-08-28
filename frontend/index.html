@@ -566,7 +566,7 @@
           return `
             <tr class="border-t">
               <td class="px-3 py-2">${r.rut}</td>
-              <td class="px-3 py-2 text-red-600" colspan="10">${r.error}</td>
+              <td class="px-3 py-2 text-red-600" colspan="9">${r.error}</td>
             </tr>`;
         }
 
@@ -593,7 +593,6 @@
             <td class="px-3 py-2 text-center">${r.plazo_recomendado ?? 'N/A'}</td>
             <td class="px-3 py-2 text-center">${r.promedio_historico !== undefined && r.promedio_historico !== null ? r.promedio_historico.toFixed(1) : 'N/A'}</td>
             <td class="px-3 py-2 text-center">${r.cantidad_historico ?? 0}</td>
-            <td class="px-3 py-2 text-center">${r.riesgo_detectado ? '⚠️ Sí' : 'No'}</td>
             ${celdaSimulacion}
           </tr>`;
       }).join('');
@@ -612,7 +611,6 @@
                 <th class="px-3 py-2">Plazo recomendado</th>
                 <th class="px-3 py-2">Promedio histórico</th>
                 <th class="px-3 py-2">Cant. histórico</th>
-                <th class="px-3 py-2" title="Hay documentos morosos vencidos más allá del plazo recomendado">¿Riesgo?</th>
                 <th class="px-2 py-2">Plazo (días)</th>
                 <th class="px-2 py-2">% Anticipo</th>
                 <th class="px-2 py-2">Simular</th>
