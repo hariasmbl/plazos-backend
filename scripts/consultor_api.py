@@ -10,6 +10,7 @@ import numpy as np
 import os
 import shutil
 import io
+import re
 
 from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad, normalizar_clave
 
@@ -84,6 +85,81 @@ def es_outlier(valor, promedio, desviacion):
         return False
     z = (valor - promedio) / desviacion
     return abs(z) > 2.0
+
+
+# ============================================================
+# 🔧 Normalización y validación de RUT
+# ============================================================
+
+RUT_RE = re.compile(r"^\d{6,8}(-[0-9K])?$")
+
+# Nombres de columna que sugieren claramente que NO es una columna de RUT,
+# aunque su contenido tenga la misma forma (dígitos) que un RUT sin DV.
+NOMBRES_NO_RUT = re.compile(
+    r"documento|folio|factura|boleta|n[uú]mero|n[uú]m\b|\bid\b|c[oó]digo|monto|fecha|total|orden|guia",
+    re.IGNORECASE
+)
+
+
+def parece_rut(valor):
+    """True si el valor, limpio de puntos/espacios, tiene forma de RUT chileno
+    (6 a 8 dígitos, con o sin guion+DV). Es una heurística de contenido, no
+    una validación real — se usa para detectar en qué columna de un archivo
+    subido probablemente vienen los RUTs."""
+    limpio = str(valor).strip().replace(".", "").replace(" ", "").upper()
+    return bool(RUT_RE.match(limpio))
+
+
+def calcular_dv(rut_numero):
+    """Dígito verificador chileno (módulo 11) para la parte numérica de un RUT."""
+    suma = 0
+    multiplicador = 2
+    for digito in reversed(str(rut_numero)):
+        suma += int(digito) * multiplicador
+        multiplicador = multiplicador + 1 if multiplicador < 7 else 2
+    resto = 11 - (suma % 11)
+    if resto == 11:
+        return "0"
+    if resto == 10:
+        return "K"
+    return str(resto)
+
+
+def normalizar_y_completar_rut(valor):
+    """
+    Limpia un RUT (quita puntos/espacios, mayúsculas) y completa el dígito
+    verificador si falta, calculándolo con módulo 11. Si ya trae DV, lo
+    valida contra el cálculo pero NO lo corrige si no calza — podría ser un
+    RUT mal tipeado por completo, no solo el DV — solo lo marca.
+
+    Devuelve (rut_final, estado):
+    - "ok": no hizo falta tocarlo, DV correcto.
+    - "completado": no traía DV, se calculó y agregó.
+    - "dv_sospechoso": traía DV pero no coincide con el cálculo esperado
+      (se deja tal cual vino, sin corregir).
+    - "invalido": no se pudo interpretar como RUT (rut_final es None).
+    """
+    limpio = str(valor).strip().replace(".", "").replace(" ", "").upper()
+    if not limpio:
+        return None, "invalido"
+
+    if "-" in limpio:
+        numero, dv = limpio.rsplit("-", 1)
+    else:
+        numero, dv = limpio, None
+
+    if not numero.isdigit() or not (1 <= len(numero) <= 8):
+        return None, "invalido"
+
+    dv_calculado = calcular_dv(numero)
+
+    if dv is None:
+        return f"{numero}-{dv_calculado}", "completado"
+
+    if dv != dv_calculado:
+        return f"{numero}-{dv}", "dv_sospechoso"
+
+    return f"{numero}-{dv}", "ok"
 
 
 def _cruzar(facturas, pagos_deudor, rut=None):
@@ -424,11 +500,46 @@ class RutsBatchRequest(BaseModel):
 
 @app.post("/consultar-ruts-batch")
 def consultar_ruts_batch(payload: RutsBatchRequest):
-    # Dedup preservando el orden de entrada
-    ruts = list(dict.fromkeys(r.strip() for r in payload.ruts if r and r.strip()))
+    completados = 0
+    dv_sospechoso = 0
+    invalidos = 0
+    ruts_a_consultar = []
+    resultados_dv_sospechoso = []
 
-    if not ruts:
-        return JSONResponse(status_code=400, content={"error": "Debe incluir al menos un RUT."})
+    for valor in payload.ruts:
+        if not valor or not valor.strip():
+            continue
+        rut_final, estado = normalizar_y_completar_rut(valor)
+        if estado == "invalido":
+            invalidos += 1
+            continue
+        if estado == "dv_sospechoso":
+            # No se consulta: el DV no calza con el cálculo esperado, así
+            # que casi seguro no va a matchear nada en Mongo -- y mostrar
+            # eso como "sin historial" escondería que el problema real es
+            # que el RUT está mal escrito.
+            dv_sospechoso += 1
+            resultados_dv_sospechoso.append({
+                "rut": rut_final,
+                "error": "DV inválido — revisa el RUT",
+                "dv_sospechoso": True
+            })
+            continue
+        if estado == "completado":
+            completados += 1
+        ruts_a_consultar.append(rut_final)
+
+    # Dedup preservando el orden de entrada
+    ruts = list(dict.fromkeys(ruts_a_consultar))
+
+    resumen_normalizacion = {
+        "completados": completados,
+        "dv_sospechoso": dv_sospechoso,
+        "invalidos": invalidos
+    }
+
+    if not ruts and not resultados_dv_sospechoso:
+        return JSONResponse(status_code=400, content={"error": "Debe incluir al menos un RUT válido."})
 
     if len(ruts) > LIMITE_BATCH_RUTS:
         return JSONResponse(
@@ -436,43 +547,102 @@ def consultar_ruts_batch(payload: RutsBatchRequest):
             content={"error": f"Máximo {LIMITE_BATCH_RUTS} RUTs por consulta (se recibieron {len(ruts)})."}
         )
 
-    # Una sola query $in para todos los RUTs en vez de una por RUT
-    facturas_por_rut = defaultdict(list)
-    for d in docs.find({"RUT DEUDOR": {"$in": ruts}}):
-        facturas_por_rut[d.get("RUT DEUDOR")].append(d)
+    resultados = list(resultados_dv_sospechoso)
 
-    pagos_por_rut = defaultdict(list)
-    for p in pagos.find({"Rut Deudor": {"$in": ruts}}):
-        pagos_por_rut[p.get("Rut Deudor")].append(p)
+    if ruts:
+        # Una sola query $in para todos los RUTs en vez de una por RUT
+        facturas_por_rut = defaultdict(list)
+        for d in docs.find({"RUT DEUDOR": {"$in": ruts}}):
+            facturas_por_rut[d.get("RUT DEUDOR")].append(d)
 
-    morosos_por_rut = defaultdict(list)
-    for m in docs.find({"RUT DEUDOR": {"$in": ruts}, "ESTADO": "MOROSO"}):
-        morosos_por_rut[m.get("RUT DEUDOR")].append(m)
+        pagos_por_rut = defaultdict(list)
+        for p in pagos.find({"Rut Deudor": {"$in": ruts}}):
+            pagos_por_rut[p.get("Rut Deudor")].append(p)
 
-    resultados = []
-    for rut in ruts:
-        try:
-            resultado = procesar_rut(
-                rut,
-                facturas_por_rut.get(rut, []),
-                pagos_por_rut.get(rut, []),
-                morosos_por_rut.get(rut, [])
-            )
-        except Exception as e:
-            resultado = {"error": f"Error al procesar RUT: {str(e)}"}
+        morosos_por_rut = defaultdict(list)
+        for m in docs.find({"RUT DEUDOR": {"$in": ruts}, "ESTADO": "MOROSO"}):
+            morosos_por_rut[m.get("RUT DEUDOR")].append(m)
 
-        resultado["rut"] = rut
-        resultados.append(resultado)
+        for rut in ruts:
+            try:
+                resultado = procesar_rut(
+                    rut,
+                    facturas_por_rut.get(rut, []),
+                    pagos_por_rut.get(rut, []),
+                    morosos_por_rut.get(rut, [])
+                )
+            except Exception as e:
+                resultado = {"error": f"Error al procesar RUT: {str(e)}"}
 
-    return {"resultados": resultados}
+            resultado["rut"] = rut
+            resultados.append(resultado)
+
+    return {"resultados": resultados, "resumen_normalizacion": resumen_normalizacion}
+
+
+def _valor_parece_dato(valor):
+    """
+    True si el valor se ve como un dato (numérico, RUT o fecha) en vez de
+    un título de columna descriptivo (ej. "Nombre Cliente", "RUT").
+    """
+    limpio = str(valor).strip()
+    if not limpio:
+        return False
+    if parece_rut(limpio):
+        return True
+    try:
+        float(limpio.replace(",", "."))
+        return True
+    except ValueError:
+        pass
+    if re.match(r"^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}$", limpio):
+        return True
+    return False
+
+
+def _tiene_header(df_sin_header):
+    """
+    Heurística: compara la fila 0 contra el resto de cada columna. Si en la
+    mayoría de las columnas la fila 0 se ve como texto descriptivo mientras
+    el resto son datos (numéricos/RUT/fecha), es un header real. Si la fila
+    0 "encaja" con el patrón de datos del resto, probablemente no hay header
+    y pandas se tragó una fila de datos como nombre de columna.
+    """
+    if len(df_sin_header) < 2:
+        return True  # muy pocas filas para comparar con confianza
+
+    fila0 = df_sin_header.iloc[0]
+    resto = df_sin_header.iloc[1:]
+
+    columnas_evaluables = 0
+    columnas_con_contraste = 0
+
+    for col in df_sin_header.columns:
+        valores_resto = [v for v in resto[col].tolist() if str(v).strip() and str(v).strip().lower() != "nan"]
+        if not valores_resto:
+            continue
+
+        columnas_evaluables += 1
+        resto_son_datos = sum(1 for v in valores_resto if _valor_parece_dato(v)) / len(valores_resto) > 0.6
+        header_es_texto = not _valor_parece_dato(fila0[col])
+
+        if resto_son_datos and header_es_texto:
+            columnas_con_contraste += 1
+
+    if columnas_evaluables == 0:
+        return True
+
+    return (columnas_con_contraste / columnas_evaluables) > 0.5
 
 
 @app.post("/extraer-ruts")
 async def extraer_ruts(file: UploadFile = File(...)):
     """
-    Lee un Excel/CSV subido y devuelve la lista de RUTs de la columna
-    "RUT" (sin importar mayúsculas/minúsculas); si no encuentra esa
-    columna, usa la primera. Solo extrae texto, no toca la base de datos.
+    Lee un Excel/CSV subido y devuelve la lista de RUTs, ya normalizados
+    (DV completado si faltaba). Detecta si el archivo trae fila de
+    encabezado o no, y si no encuentra una columna llamada "RUT", identifica
+    la columna correcta por contenido (qué tan seguido matchea el patrón de
+    RUT chileno) en vez de asumir la primera columna a ciegas.
     """
     import pandas as pd
 
@@ -480,22 +650,80 @@ async def extraer_ruts(file: UploadFile = File(...)):
         contenido = await file.read()
         nombre = (file.filename or "").lower()
 
-        if nombre.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(contenido))
-        else:
-            df = pd.read_excel(io.BytesIO(contenido))
+        def leer(header):
+            if nombre.endswith(".csv"):
+                return pd.read_csv(io.BytesIO(contenido), header=header, dtype=str)
+            return pd.read_excel(io.BytesIO(contenido), header=header, dtype=str)
 
-        if df.empty or len(df.columns) == 0:
+        df_crudo = leer(header=None)
+
+        if df_crudo.empty or len(df_crudo.columns) == 0:
             return JSONResponse(status_code=400, content={"error": "El archivo no tiene columnas legibles."})
+
+        hay_header = _tiene_header(df_crudo)
+        df = leer(header=0) if hay_header else df_crudo
 
         columna_rut = next(
             (col for col in df.columns if str(col).strip().upper() == "RUT"),
-            df.columns[0]
+            None
         )
 
-        ruts = [str(v).strip() for v in df[columna_rut].dropna().tolist() if str(v).strip()]
+        if columna_rut is None:
+            # Si el archivo tiene encabezado real, un nombre de columna que
+            # claramente sugiere "no es RUT" (ej. "NumDocumento", "Folio")
+            # pesa más que el simple parecido de forma con un RUT sin DV --
+            # de lo contrario cualquier número de 6-8 dígitos se confundiría
+            # con un RUT. Sin encabezado, no hay nombre que lo desmienta.
+            columnas_candidatas = [
+                col for col in df.columns
+                if not (hay_header and NOMBRES_NO_RUT.search(str(col)))
+            ]
 
-        return {"ruts": ruts, "columna_usada": str(columna_rut)}
+            mejor_col, mejor_score, segundo_score = None, 0.0, 0.0
+            for col in columnas_candidatas:
+                valores = [v for v in df[col].tolist() if str(v).strip() and str(v).strip().lower() != "nan"]
+                if not valores:
+                    continue
+                score = sum(1 for v in valores if parece_rut(v)) / len(valores)
+                if score > mejor_score:
+                    mejor_col, segundo_score, mejor_score = col, mejor_score, score
+                elif score > segundo_score:
+                    segundo_score = score
+
+            # Exigimos que la columna ganadora sea claramente RUT (>=70% de
+            # sus valores matchean) y que no haya otra columna casi tan
+            # parecida (para no adivinar entre dos candidatas ambiguas).
+            if mejor_col is None or mejor_score < 0.7 or (mejor_score - segundo_score) < 0.2:
+                return JSONResponse(status_code=400, content={
+                    "error": "No se pudo identificar con confianza la columna de RUTs. "
+                             "Verifica que el archivo tenga una columna llamada \"RUT\", o que los "
+                             "RUTs sean claramente reconocibles (sin mezclarse con otros números)."
+                })
+            columna_rut = mejor_col
+
+        valores_originales = [str(v).strip() for v in df[columna_rut].tolist() if str(v).strip() and str(v).strip().lower() != "nan"]
+
+        ruts, completados, dv_sospechoso, invalidos = [], 0, 0, 0
+        for valor in valores_originales:
+            rut_final, estado = normalizar_y_completar_rut(valor)
+            if estado == "invalido":
+                invalidos += 1
+                continue
+            if estado == "completado":
+                completados += 1
+            elif estado == "dv_sospechoso":
+                dv_sospechoso += 1
+            ruts.append(rut_final)
+
+        return {
+            "ruts": ruts,
+            "columna_usada": str(columna_rut),
+            "resumen_normalizacion": {
+                "completados": completados,
+                "dv_sospechoso": dv_sospechoso,
+                "invalidos": invalidos
+            }
+        }
 
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"No se pudo leer el archivo: {str(e)}"})
