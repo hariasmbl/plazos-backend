@@ -11,6 +11,7 @@ import os
 import shutil
 import io
 import re
+import unicodedata
 
 from scripts.consultor import aplicar_reglas_verano, obtener_tipo_entidad, normalizar_clave
 
@@ -162,6 +163,29 @@ def normalizar_y_completar_rut(valor):
     return f"{numero}-{dv}", "ok"
 
 
+# ============================================================
+# 🚫 Exclusión de pagarés del cálculo de plazos
+# ============================================================
+# Decisión de negocio: los pagarés (capital de trabajo) tienen fechas
+# acordadas que no reflejan el plazo de pago del pagador, así que no
+# alimentan ninguna cifra de plazo (promedio, desviación, outliers,
+# últimos 5, factura de mayor plazo, plazo_recomendado ni empresas
+# similares). Se siguen cargando en la base y la lista de morosos no
+# cambia: solo se excluyen del cálculo.
+
+def _sin_tildes(valor):
+    texto = unicodedata.normalize("NFKD", str(valor or ""))
+    return "".join(c for c in texto if not unicodedata.combining(c)).strip().upper()
+
+
+def es_doc_pagare(f):
+    return _sin_tildes(f.get("TIPO DCTO")) == "PA"
+
+
+def es_pago_pagare(p):
+    return _sin_tildes(p.get("Tipo Prod.")) == "PAGARE"
+
+
 def _cruzar(facturas, pagos_deudor, rut=None):
     """
     Núcleo puro del cruce factura-pago: recibe las listas ya obtenidas de
@@ -169,22 +193,32 @@ def _cruzar(facturas, pagos_deudor, rut=None):
     batch de varios RUTs pre-cargados con $in) y hace todo el cálculo en
     memoria. Devuelve (pagos_dict, registros_validos, registros_limpios,
     promedio, desviacion) — mismo criterio de filtrado que antes.
+
+    Los pagarés (docs y pagos) no generan plazos. pagos_dict se devuelve
+    igual que antes, con todos los pagos, porque procesar_rut lo usa para
+    armar la lista de morosos y esa lista no debe cambiar.
     """
     pagos_dict = {}
+    pagos_dict_plazos = {}
     for p in pagos_deudor:
         clave = normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope."))
         if clave:
             pagos_dict[clave] = p
+            if not es_pago_pagare(p):
+                pagos_dict_plazos[clave] = p
 
     registros_validos = []
 
     for f in facturas:
+        if es_doc_pagare(f):
+            continue
+
         clave_f = normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
 
         if not clave_f:
             continue
 
-        pago = pagos_dict.get(clave_f)
+        pago = pagos_dict_plazos.get(clave_f)
 
         if pago:
             fec_emision = parse_fecha(f.get("FEC EMISION DIG"))
@@ -434,10 +468,13 @@ def procesar_rut(rut, facturas, pagos_deudor, morosos):
     pagos_sim_dict = {
         normalizar_clave(p.get("Nª Doc."), p.get("Nº Ope.")): p
         for p in pagos_sim
+        if not es_pago_pagare(p)
     }
 
     plazos_sim = []
     for f in facturas_sim:
+        if es_doc_pagare(f):
+            continue
         clave = normalizar_clave(f.get("Nº DCTO"), f.get("Nº OPE"))
         pago = pagos_sim_dict.get(clave)
         if pago:
