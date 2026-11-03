@@ -129,12 +129,13 @@ def aplicar_reglas_verano(rut, promedio_verano, promedio_anual, desv_verano, des
     if mes not in [11, 12, 1, 2]:
         return {
             "plazo_recomendado": None,
-            "factor_dias": 15,  # 15 días por punto de anticipo = 2% mora
+            # 15 días por punto de anticipo = 2% mora; SERVIU/MINVU mantiene 7.5 todo el año
+            "factor_dias": 7.5 if tipo == "SERVIU / MINVU" else 15,
             "tipo": tipo
         }
 
-    # Si no es muni / corp / MOP → reglas normales
-    if tipo not in ["MUNICIPALIDAD", "CORP MUNICIPAL", "MOP"]:
+    # Si no es muni / corp / MOP / SERVIU → reglas normales
+    if tipo not in ["MUNICIPALIDAD", "CORP MUNICIPAL", "MOP", "SERVIU / MINVU"]:
         return {
             "plazo_recomendado": None,
             "factor_dias": 15,
@@ -151,7 +152,7 @@ def aplicar_reglas_verano(rut, promedio_verano, promedio_anual, desv_verano, des
 
     if tipo == "SERVIU / MINVU":
         return {
-            "plazo_recomendado": 180,
+            "plazo_recomendado": 90,
             "factor_dias": 7.5,
             "tipo": tipo
         }

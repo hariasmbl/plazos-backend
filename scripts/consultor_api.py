@@ -353,12 +353,9 @@ def procesar_rut(rut, facturas, pagos_deudor, morosos):
         factor_dias = reglas.get("factor_dias", 15)
         plazo_regla = reglas.get("plazo_recomendado")
 
-        # 🔧 Sobrescribir regla si es SERVIU/MINVU
-        if tipo == "SERVIU / MINVU":
-            plazo_recomendado = 180
-            factor_dias = 7.5
-        elif plazo_regla is not None and not np.isnan(plazo_regla):
-            plazo_recomendado = plazo_regla
+        if plazo_regla is not None and not np.isnan(plazo_regla):
+            # La regla de verano solo puede alargar el plazo, nunca acortarlo
+            plazo_recomendado = max(plazo_recomendado, plazo_regla)
 
         morosos_data = []
 
@@ -430,8 +427,9 @@ def procesar_rut(rut, facturas, pagos_deudor, morosos):
         nombre = empresa_base.get("nombre") if empresa_base else "Entidad Pública (sin nombre registrado)"
 
         if tipo_entidad == "SERVIU / MINVU":
-            plazo_recomendado = 180
-            recomendacion = "Se recomienda cubrir 180 días entre plazo y anticipo (regla SERVIU/MINVU)."
+            # Sin historial no hay cálculo normal: 90 en verano, 180 el resto del año
+            plazo_recomendado = 90 if datetime.now().month in [11, 12, 1, 2] else 180
+            recomendacion = f"Se recomienda cubrir {plazo_recomendado} días entre plazo y anticipo (regla SERVIU/MINVU)."
         else:
             plazo_recomendado = 105
             recomendacion = "Se recomienda cubrir 105 días entre plazo y anticipo (promedio verano municipalidades)."
